@@ -1,0 +1,402 @@
+emacs .bashrc
+vi .bashrc
+. .bashrc
+history
+sudo visudo
+fg
+sudo apt-get install emacs24 openssh-server fluxbox conky git-core
+sudo apt-get install apt-file texlive-xetex traceroute nmap texlive-latex-extras meld gnupg2 xscreensaver* gitk thunar mercurial feh xautomation apache2
+sudo apt-get install apt-file texlive-xetex traceroute nmap texlive-latex-extra meld gnupg2 xscreensaver* gitk thunar mercurial feh xautomation apache2 postgresql sqlite3
+sudo apt-file update
+sudo emacs /etc/apt/sources.list
+sudo apt-get update
+apt-cache search fishfish
+apt-cache search fish
+apt-cache search fish | grep -i term
+apt-cache search fish | grep -i sh
+apt-cache search fish | grep -i shell
+sudo apt-get install fish
+fish
+ls
+sudo apt-get install xdm
+sudo reboot
+cd xinit
+ls
+emacs xinitrc
+update-alternatives --all
+ls
+cd ..
+grep -Ri lightdm *
+grep -Ri xdm &
+grep -Ri xdm *
+grep -Ri xdm 
+grep -Ri xdm
+grep -Ri xdm -
+grep -Ri xdm
+ls
+emacs default-display-manager 
+grep -Ri fluxbox
+ls
+cd xdm
+ls
+grep -Ri unity 
+grep -Ri uni 
+grep -Ri flux
+ls
+cd ..
+ls
+grep -Ri gnome *
+emacs Xsession
+grep -Ri shell *
+apt-get install gdm
+apt-get install qingy gdm kdm ldm
+apt-cache search xdm-options
+apt-cache search xdm-option
+apt-cache search xdm
+apt-cache search dtlogin
+apt-cache search cde
+apt-cache saerch scologin
+apt-cache search scologin
+apt-cache search wings
+sudo apt-get install wdm
+apt-cache search entranced
+apt-cache search entrance
+apt-cache search edm
+apt-cache search display manager
+apt-cache search "display manager"
+apt-get install ldm nodm sdm 
+apt-cache search lxdm
+apt-cache search "login manager"
+sudo apt-get install lxdm slim 
+apt-cache search cdm
+apt-cache search xlogin
+apt-cache search enter
+apt-cache saerch orthos
+apt-cache search orthos
+update-alternatives --help
+update-alternatives --all
+exit
+cd
+ls
+cd Desktop
+rm -rf Untitled\ Folder/
+killall thunar
+cd /etc/X11
+ls
+sudo -s
+exit
+sudo dpkg-reconfigure xdm
+cat /etc/X11/default-display-manager 
+sudo reboot
+sudo dpkg-reconfigure xdm
+sudo reboot
+cd
+sudo dpkg-reconfigure xdm
+sudo reboot
+sudo poweroff
+sudo dpkg-reconfigure xdm
+sudo reboot
+cd
+sudo dpkg-reconfigure xdm
+sudo reboot
+sudo dpkg-reconfigure xdm
+sudo reboot
+sudo dpkg-reconfigure xdm
+sudo reboot
+sudo apt-get remoev gdm kdm lxdm slim wdm xdm
+sudo apt-get remove gdm kdm lxdm slim wdm xdm
+dpkg -i | grep -i manager
+dpkg -l | grep -i manager
+sudo dpkg-reconfigure xdm
+sudo dpkg-reconfigure lightdm
+sudo reboot
+cd /etc
+cd X11
+ls
+sudo rm -rf xdm wdm 
+cd Xresources
+ls
+emacs xterm
+sudo emacs xterm
+bg
+apt-cache search dejavu
+sudo apt-get install ttf-dejavu*
+sudo apt-get install ttf-dejavu ttf-dejavu-extra ttf-dejavu-core
+sudo apt-get autoremove
+sudo reboot
+xterm
+emacs
+sudo chown -R atw .emacs.d
+sudo chgrp -R atw .emacs.d
+ls -ltra
+ls -ltra /etc/skel
+emacs .bashrc
+mount
+ls
+sudo mount -t vboxsf -o uid=$UID,gid=$GID share ~/host
+mkdir host
+sudo mount -t vboxsf -o uid=$UID,gid=$GID share ~/host
+rmdir host
+ls
+sudo reboot
+dpkg -l > a
+emacs a
+bg
+killall emacs
+cd /etc
+cd X11
+ls
+cat default-display-manager 
+choosewm
+ls
+grep -Ri unity *
+sudo update-alternatives x-window-manager
+sudo update-alternatives --set x-window-manager
+sudo update-alternatives --get-selections x-window-manager
+sudo update-alternatives --get-selections 
+cd /etc
+cd alternatives/
+ls
+ls -l x-window-manager
+ls -l
+ls -l | grep -i unity
+ls -l | grep -i gnome
+cd
+ls
+rm a
+rm \#a# 
+emacs .emacs
+emacs
+emacs .emacs
+emacs
+emacs .emacs
+sudo cp .emacs /etc/skel/.
+gnupg2
+gnupg
+emacs .bashrc
+. .bashrc
+gpg --version
+sqlite
+emacs .bashrc
+emacs .pythonrc
+. .bashrc
+emacs .bashrc
+. .bashrc
+python 
+emacs .pythonrc
+rm .python_history
+python
+ls -ltra
+cat .python_history
+python
+cat .python_history
+sudo cp .pythonrc /etc/skel/.
+sudo cp .bashrc /etc/skel/.
+ls -ltra
+sudo cp .emacs /etc/skel/.
+rm *~
+rm -f *~
+rm -f .*~
+ls -ltra
+history
+wc -l .bash_history
+sudo adduser foo
+sudo deluser foo
+sudo rm -rf /home/foo
+cd .fluxbox
+ls
+cd backgrounds/
+ls
+fbsetbg -i
+firefox
+feh /home/atw/Downloads/beast.png 
+man feh
+feh --bg-center /home/atw/Downloads/beast.png 
+fbsetbg --help
+cd .fluxbox
+ls
+cat lastwallpaper 
+cp ../Downloads/beast.png backgrounds/.
+cd backgrounds/
+ls
+fbsetbg `pwd`/beast.png
+fbsetbg --center `pwd`/beast.png
+fbsetbg -c `pwd`/beast.png
+cd .fluxbox
+ls
+cd ..
+grep -Ri atw .fluxbox
+cd .fluxbox
+ls
+emacs startup 
+grep -Ri atw .fluxbox
+grep -Ri atw .
+rm *~
+emacs lastwallpaper 
+sudo reboot
+cd .fluxbox
+ls
+emacs lastwallpaper
+locate ubuntu*png
+sudo updatedb
+locate ubuntu*png
+locate -i ubuntu*png
+locate -i logo*png
+cd /etc/X11
+ls
+cd fluxbox/
+ls
+file *
+cd ..
+ls
+cd
+locate fluxbox
+locate fluxbox | grep -i png
+cd /usr/share/images/fluxbox
+ls
+sudo cp ~/.fluxbox/backgrounds/beast.png .
+cd
+fbsetbg /usr/share/images/fluxbox/beast.png
+fbsetbg -c /usr/share/images/fluxbox/beast.png
+cd .fluxbox
+grep -Ri atw *
+rm *~
+grep -Ri atw .fluxbox
+grep -Ri atw .fluxbox/*
+grep -Ri atw .fluxbox/.*
+ls
+sudo cp -rf .fluxbox /etc/skel/.
+sudo adduser foo
+sudo reboot
+sudo update-alternatives
+sudo update-alternatives --all
+editor
+sudo update-alternatives --all
+editor
+firefox
+cd Downloads/
+ls -ltr
+sudo dpkg -i google-chrome-stable_current_i386.deb 
+sudo deluser foo
+sudo rm -rf /home/foo
+sudo delgroup foo
+cd .fluxbox
+ls
+emacs keys
+emacs startup
+cd ..
+grep -Ri atw .fluxbox
+sudo rm -rf /etc/skel/.fluxbox
+sudo cp -rf .fluxbox /etc/skel/.
+sudo reboot
+diff Downloads/init .fluxbox/init 
+diff Downloads/init .fluxbox/init  > a
+emacs a
+emacs .fluxbox/keys
+cd .fluxbox/
+ls
+emacs init
+rm *~
+cd
+diff Downloads/keys .fluxbox/keys > a
+cd .fluxbox/
+emacs keys 
+cd ..
+sudo rm -rf /etc/skel/.fluxbox
+sudo cp -rf .fluxbox /etc/skel/.
+cd .config/
+ls
+cd google-chrome/
+ls
+cd Default/
+ls
+grep -Ri theme *
+cd Extension
+ls
+cd Extensions/
+ls
+cd ..
+grep -ri berlin *
+ls
+cd User\ StyleSheets/
+ls
+cat Custom.css 
+cd ..
+ls
+cd Local\ Storage/
+ls
+cd ..
+ls
+grep -Ri theme *
+grep -Ri wood *
+emacs Preferences 
+cp -rf Preferences ~/.
+cd
+sudo dpkg -P google-chrome-stable 
+google-chrome
+sudo dpkg -i Downloads/google-chrome-stable_current_i386.deb 
+sudo apt-get install libgconf2-4
+sudo dpkg -i Downloads/google-chrome-stable_current_i386.deb 
+google-chrome 
+sudo dpkg -P google-chrome-stable 
+cd .config
+ls
+sudo rm -rf google-chrome/
+cd ..
+google-chrome
+sudo dpkg -i Downloads/google-chrome-stable_current_
+sudo dpkg -i Downloads/google-chrome-stable_current_i386.deb 
+google-chrome 
+cp Preferences .config/google-chrome/Default/.
+google-chrome 
+cd .config
+ls
+sudo dpkg -P google-chrome-stable 
+sudo rm -rf google-chrome/
+cd ..
+sudo apt-get autoremove
+sudo dpkg -i Downloads/google-chrome-stable_current_i386.deb 
+google-chrome 
+cat /etc/null > /etc/motd
+cat /dev/null > /etc/motd
+cd
+cat /etc/motd
+sudo rm -rf /etc/skel/.fluxbox/
+sudo cp -rf .fluxbox /etc/skel/.
+sudo apt-get install apache2 xautomation gimp gnuplot mercurial gitk texlive-xetex texlive-latex-extra nmap traceroute git-core apt-file
+fish
+cat /etc/motd
+sudo cat /dev/null > /etc/motd
+sudo (cat /dev/null > /etc/motd)
+sudo -s
+wc -l .bash_history
+xset
+wget
+sudo apt-get install cmus vlc
+dig
+stat
+mdfind
+pip
+sudo apt-get install pip
+sudo apt-get install python-pip
+pip
+apt-cache showpkg python-pip
+apt-cache search python-pip
+sudo apt-get install python-pip
+pip
+pip help
+pip search pygame
+pip
+pip help
+clang++
+apt-cache search clang
+sudo apt-get install imagemagick
+say
+sudo apt-get install gnustep-gui-runtime
+say "hello, world"
+telnet
+rake
+apt-cache search rake
+npm
+apt-cache search npm
+sftp
