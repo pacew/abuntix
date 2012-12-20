@@ -12,3 +12,18 @@ install google-chrome
 config fluxbox
 set up chrome custom theme
 https://chrome.google.com/webstore/detail/monochrome/idnlphmmcijokifloflhecnkkhbpdnnk
+
+TODO:
+debathena
+
+pre-tuned browser (flashblock, adblock, firefox ramdisk, etc.)
+^^ maybe not *block?
+
+configured servers (which are not enabled by default, such as
+ftp, irc, etc.)
+
+xmonad, wmii, or a similar window manager option, with the primary
+lightweight (flux, lxde, xfce properly configured, etc.)
+
+SLiM or a proper login manager (if you do indeed require runlevel
+5)"
