@@ -269,7 +269,7 @@ check_pythonrc (void)
 void
 check_xterm (void)
 {
-	if (!system ("[ -e /etc/X11/Xresources/xterm ]")) {
+	if (system ("[ -e /etc/X11/Xresources/xterm ]")) {
 		error_flag = 1;
 		printf ("sudo cp xterm.resources"
 			" /etc/X11/Xresources/xterm\n\n");
