@@ -1,0 +1,68 @@
+(defun just-compile ()
+  (interactive)
+  (setq compile-command "make")
+  (compile compile-command ))
+(global-set-key (kbd "M-m") 'just-compile)
+
+(defun compile-buffer ()
+  (interactive)
+  (setq name (car (split-string (buffer-name (current-buffer)) "[.]")))
+  (compile (format "make %s" name)))
+(global-set-key (kbd "C-M-m") 'compile-buffer)
+
+(custom-set-variables
+ ;; custom-set-variables was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ '(c-default-style (quote ((c-mode . "bsd") (java-mode . "java") (awk-mode . "awk") (other . "gnu"))))
+ '(inhibit-startup-screen t)
+ '(initial-scratch-message nil)
+ '(transient-mark-mode nil))
+
+(show-paren-mode t)
+
+(setq line-move-visual nil)
+(setq calc-display-trail nil)
+(setq tramp-default-method "ssh")
+
+(put 'upcase-region 'disabled nil)
+(put 'downcase-region 'disabled nil)
+(put 'narrow-to-region 'disabled nil)
+
+(global-set-key [f12] 'next-error)
+
+(defun insert-password (str)
+  (interactive "sPassword to insert: ")
+  (insert "base64:" (base64-encode-string str)))
+(global-set-key [f8] 'insert-password)
+
+(defun show-password (display)
+  (interactive "P")
+  (save-excursion
+    (skip-chars-backward "a-zA-Z0-9+/=:")
+    (cond ((looking-at "base64:")
+	   (forward-char 7)
+	   (let ((start (point)))
+	     (skip-chars-forward "a-zA-Z0-9+/=")
+	     (let ((pw (base64-decode-string (buffer-substring start (point)))))
+	       (x-set-selection 'PRIMARY pw)
+	       (cond ((null display)
+		      (message "Password stored on clipboard"))
+		     (t
+		      (message "Password: %s" pw))))))
+	  (t
+	   (error "Point is not over a base64 encoded password")))))
+(global-set-key [f9] 'show-password)
+
+(custom-set-faces
+ ;; custom-set-faces was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ '(default ((t (:stipple nil :background "white" :foreground "black" :box nil :strike-through nil :overline nil :underline nil :slant normal :weight normal :height 88 :width normal :foundry "unknown" :family "DejaVu Sans Mono"))))
+ '(font-lock-builtin-face ((((class color) (min-colors 88) (background light)) (:foreground "seagreen"))))
+ '(font-lock-keyword-face ((((class color) (min-colors 88) (background light)) (:foreground "darkviolet"))))
+ '(font-lock-string-face ((((class color) (min-colors 88) (background light)) (:foreground "black"))))
+ '(font-lock-variable-name-face ((((class color) (min-colors 88) (background light)) (:foreground "darkgoldenrod3"))))
+ '(region ((t (:background "LightGoldenrod2")))))

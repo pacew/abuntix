@@ -1,0 +1,12 @@
+xterm.vt100.altIsNotMeta: true
+xterm.vt100.altSendsEscape: true
+xterm.vt100.faceSize: 9x18
+xterm.vt100.faceName: DejaVu Sans Mono
+xterm*foreground: black
+xterm*background: white
+uxterm.vt100.altIsNotMeta: true
+uxterm.vt100.altSendsEscape: true
+uxterm.vt100.faceSize: 9x18
+uxterm.vt100.faceName: DejaVu Sans Mono
+uxterm*foreground: black
+uxterm*background: white

@@ -1,6 +1,5 @@
 extend histfile size for shell
 change /etc/apt/sources.list to use mirrors.mit.edu
-change default display manager to xdm
 change default window manager to fluxbox
 set emacs (option at install to set vi?) as default editor
 set default terminal to uxterm
@@ -12,6 +11,7 @@ install google-chrome
 config fluxbox
 set up chrome custom theme
 https://chrome.google.com/webstore/detail/monochrome/idnlphmmcijokifloflhecnkkhbpdnnk
+uninstall lens shopping
 
 TODO:
 debathena
