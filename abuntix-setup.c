@@ -338,7 +338,7 @@ check_env (void)
 	/* 	printf ("echo 'alias sqlite=sqlite3' >> $HOME/.bashrc"); */
 
 	pythonstartup = getenv ("PYTHONSTARTUP");
-	if (!pythonstartup || !strcmp (pythonstartup, ".pythonrc")) {
+	if (!pythonstartup || !strcmp (pythonstartup, "~/.pythonrc")) {
 		printf ("echo 'export PYTHONSTARTUP=.pythronrc'"
 			" >> $HOME/.bashrc\n");
 		error_flag = 1;
