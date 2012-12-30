@@ -129,10 +129,9 @@ static int
 mk_backup_tree (const char *path, const struct stat *sb,
 		int tflag, struct FTW *ftwbuf)
 {
-	char buf[1024*1024], dst_path[PATH_MAX];
-	struct stat stat_buf;
+	char buf[1024*1024], dst_name[PATH_MAX], lnk_tar[PATH_MAX];
 	FILE *src, *dst;
-	int n_read;
+	int n_read, r;
 
 	switch (tflag) {
 	case FTW_F:
@@ -147,10 +146,10 @@ mk_backup_tree (const char *path, const struct stat *sb,
 			exit (1);
 		}
 
-		sprintf (dst_path, "%s/%s", backup_dir, path);
+		sprintf (dst_name, "%s/%s", backup_dir, path);
 
-		if ((dst = fopen (dst_path, "w")) == NULL) {
-			fprintf (stderr, "cannot open dst file %s\n", dst_path);
+		if ((dst = fopen (dst_name, "w")) == NULL) {
+			fprintf (stderr, "cannot open dst file %s\n", dst_name);
 			exit (1);
 		}
 
@@ -167,37 +166,60 @@ mk_backup_tree (const char *path, const struct stat *sb,
 			exit (1);
 		}
 		if (fclose (dst) != 0) {
-			fprintf (stderr, "error closing file %s: %m", dst_path);
+			fprintf (stderr, "error closing file %s: %m", dst_name);
 			exit (1);
 		}
 
-		set_immutable (dst_path);
+		set_immutable (dst_name);
 
 		break;
 	case FTW_D:
-		if (lstat (path, &stat_buf) == -1) {
-			fprintf (stderr, "failed to stat directory %s: %m\n",
-				 path);
-			exit (1);
-		}
-
 		// add 100 for a safe buffer
 		if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
 			fprintf (stderr, "path exceeds PATH_MAX\n");
 			exit (1);
 		}
 
-		sprintf (dst_path, "%s/%s", backup_dir, path);
+		sprintf (dst_name, "%s/%s", backup_dir, path);
 
-		if (mkdir (dst_path, stat_buf.st_mode) == -1) {
+		if (mkdir (dst_name, sb->st_mode) == -1) {
 			fprintf (stderr, "failed to create directory %s: %m\n",
-				 dst_path);
+				 dst_name);
 			exit (1);
 		}
 
 		break;
 	case FTW_SL:
-		// symbolic link
+		// add 100 for a safe buffer
+		if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
+			fprintf (stderr, "path exceeds PATH_MAX\n");
+			exit (1);
+		}
+
+		sprintf (dst_name, "%s/%s", backup_dir, path);
+
+		r = readlink (path, lnk_tar, sb->st_size + 1);
+
+		if (r < 0) {
+			fprintf (stderr, "failed to read link %s: %m\n",
+				 dst_name);
+			exit (1);
+		}
+
+		if (r > sb->st_size) {
+			fprintf (stderr, "symlink increased in size "
+				 "between lstat and readlink\n");
+			exit (1);
+		}
+
+		lnk_tar[sb->st_size] = 0;
+
+		if (symlink (lnk_tar, dst_name) == -1) {
+			fprintf (stderr, "failed to create symlink %s: %m\n",
+				 dst_name);
+			exit (1);
+		}
+
 		break;
 	default:
 		break;
