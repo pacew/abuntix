@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE 500
 #include <stdio.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -7,9 +8,12 @@
 #include <errno.h>
 #include <limits.h>
 #include <string.h>
+#include <ftw.h>
 
 #define EXT2_IMMUTABLE_FL 0x00000010
 #define BACKUP_DIR "/big"
+
+#define MAX_DIRS_OPEN 20
 
 char *backup_dir = BACKUP_DIR;
 
@@ -121,10 +125,91 @@ mk_backup (char *fn)
 	set_immutable (dst_fn);
 }
 
+static int
+mk_backup_tree (const char *path, const struct stat *sb,
+		int tflag, struct FTW *ftwbuf)
+{
+	char buf[1024*1024], dst_path[PATH_MAX];
+	struct stat stat_buf;
+	FILE *src, *dst;
+	int n_read;
+
+	switch (tflag) {
+	case FTW_F:
+		if ((src = fopen (path, "r")) == NULL) {
+			printf ("cannot open src file %s\n", path);
+			exit (1);
+		}
+
+		// add 100 for a safe buffer
+		if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
+			fprintf (stderr, "path exceeds PATH_MAX\n");
+			exit (1);
+		}
+
+		sprintf (dst_path, "%s/%s", backup_dir, path);
+
+		if ((dst = fopen (dst_path, "w")) == NULL) {
+			fprintf (stderr, "cannot open dst file %s\n", dst_path);
+			exit (1);
+		}
+
+		while ((n_read = fread (buf, 1, sizeof buf, src)) > 0) {
+			if (fwrite (buf, 1, n_read, dst) != n_read) {
+				fprintf (stderr, "error copying file:"
+					 " potentially out of space\n");
+				exit (1);
+			}
+		}
+
+		if (fclose (src) != 0) {
+			fprintf (stderr, "error closing file %s: %m", path);
+			exit (1);
+		}
+		if (fclose (dst) != 0) {
+			fprintf (stderr, "error closing file %s: %m", dst_path);
+			exit (1);
+		}
+
+		set_immutable (dst_path);
+
+		break;
+	case FTW_D:
+		if (lstat (path, &stat_buf) == -1) {
+			fprintf (stderr, "failed to stat directory %s: %m\n",
+				 path);
+			exit (1);
+		}
+
+		// add 100 for a safe buffer
+		if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
+			fprintf (stderr, "path exceeds PATH_MAX\n");
+			exit (1);
+		}
+
+		sprintf (dst_path, "%s/%s", backup_dir, path);
+
+		if (mkdir (dst_path, stat_buf.st_mode) == -1) {
+			fprintf (stderr, "failed to create directory %s: %m\n",
+				 dst_path);
+			exit (1);
+		}
+
+		break;
+	case FTW_SL:
+		// symbolic link
+		break;
+	default:
+		break;
+	}
+
+	return (0);
+}
+
 int
 main (int argc, char **argv)
 {
-	int c, idx;
+	int c, idx, flags;
 
 	while ((c = getopt (argc, argv, "")) != EOF) {
 		switch (c) {
@@ -133,9 +218,17 @@ main (int argc, char **argv)
 		}
 	}
 
+	flags = FTW_PHYS;
+
 	if (optind < argc) {
 		for (idx = optind; idx < argc; idx++) {
-			mk_backup (argv[idx]);
+			if (nftw (argv[idx], mk_backup_tree,
+				  MAX_DIRS_OPEN, flags) == -1) {
+				fprintf (stderr, "nftw failed\n");
+				return (-1);
+			}
+
+			/* mk_backup (argv[idx]); */
 		}
 	} else {
 		usage ();
