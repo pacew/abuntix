@@ -11,13 +11,15 @@
 #include <string.h>
 #include <ftw.h>
 #include <utime.h>
+#include <time.h>
 
 #define EXT2_IMMUTABLE_FL 0x00000010
 #define BACKUP_DIR "/big"
 
 #define MAX_DIRS_OPEN 20
 
-char *backup_dir = BACKUP_DIR;
+char *backup_root = BACKUP_DIR;
+char *backup_dir;
 
 void
 usage (void)
@@ -95,25 +97,53 @@ static int
 mk_backup (const char *path, const struct stat *sb,
 		int tflag, struct FTW *ftwbuf)
 {
-	char buf[1024*1024], dst_name[PATH_MAX], lnk_tar[PATH_MAX];
+	char buf[1024*1024], dst_name[PATH_MAX], lnk_tar[PATH_MAX],
+		old_tar[PATH_MAX];
 	struct utimbuf times;
 	FILE *src, *dst;
-	int n_read, r;
+	int n_read, r, exists;
+	struct stat dst_sb;
+
+	// add 100 for a safe buffer
+	if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
+		fprintf (stderr, "path exceeds PATH_MAX\n");
+		exit (1);
+	}
+
+	sprintf (dst_name, "%s/%s", backup_dir, path);
+
+	if (lstat (dst_name, &dst_sb) == -1) {
+		if (errno == ENOENT) {
+			exists = 0;
+		} else {
+			fprintf (stderr, "error with lstat on %s: %m\n",
+				 dst_name);
+			exit (1);
+		}
+	} else {
+		exists = 1;
+	}
 
 	switch (tflag) {
 	case FTW_F:
+		if (exists) {
+			if (S_ISREG (sb->st_mode)
+			    && sb->st_mtime == dst_sb.st_mtime) {
+				return (0);
+			} else {
+				fprintf (stderr, "failed to copy %s, %s with"
+					 " same name already exists\n",
+					 dst_name, S_ISREG (sb->st_mode)
+					 ? "file" : "dir");
+				return (0);
+			}
+		}
+
 		if ((src = fopen (path, "r")) == NULL) {
 			printf ("cannot open src file %s\n", path);
 			exit (1);
-		}
 
-		// add 100 for a safe buffer
-		if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
-			fprintf (stderr, "path exceeds PATH_MAX\n");
-			exit (1);
 		}
-
-		sprintf (dst_name, "%s/%s", backup_dir, path);
 
 		if ((dst = fopen (dst_name, "w")) == NULL) {
 			fprintf (stderr, "cannot open dst file %s\n", dst_name);
@@ -152,13 +182,17 @@ mk_backup (const char *path, const struct stat *sb,
 		set_immutable (dst_name);
 		break;
 	case FTW_D:
-		// add 100 for a safe buffer
-		if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
-			fprintf (stderr, "path exceeds PATH_MAX\n");
-			exit (1);
+		if (exists) {
+			if (S_ISDIR (sb->st_mode)) {
+				return (0);
+			} else {
+				fprintf (stderr, "failed to create %s, %s"
+					 " exists with same name\n", dst_name,
+					 S_ISREG (sb->st_mode)
+					 ? "file" : "symlink");
+				return (0);
+			}
 		}
-
-		sprintf (dst_name, "%s/%s", backup_dir, path);
 
 		if (mkdir (dst_name, sb->st_mode) == -1) {
 			fprintf (stderr, "failed to create directory %s: %m\n",
@@ -172,14 +206,6 @@ mk_backup (const char *path, const struct stat *sb,
 
 		break;
 	case FTW_SL:
-		// add 100 for a safe buffer
-		if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
-			fprintf (stderr, "path exceeds PATH_MAX\n");
-			exit (1);
-		}
-
-		sprintf (dst_name, "%s/%s", backup_dir, path);
-
 		r = readlink (path, lnk_tar, sb->st_size + 1);
 
 		if (r < 0) {
@@ -195,6 +221,28 @@ mk_backup (const char *path, const struct stat *sb,
 		}
 
 		lnk_tar[sb->st_size] = 0;
+
+		if (exists) {
+			if (S_ISLNK (sb->st_mode)) {
+				r = readlink (dst_name, old_tar,
+					      sb->st_size + 1);
+
+				if (r < 0) {
+					fprintf (stderr, "failed to read"
+						 " link %s: %m\n", dst_name);
+					return (0);
+				}
+
+				if (strcmp (lnk_tar, old_tar) == 0) {
+					return (0);
+				}
+			} else {
+				fprintf (stderr, "failed to create symlink %s,"
+					 " something already exists with"
+					 " same name\n", dst_name);
+				return (0);
+			}
+		}
 
 		if (symlink (lnk_tar, dst_name) == -1) {
 			fprintf (stderr, "failed to create symlink %s: %m\n",
@@ -250,7 +298,10 @@ fix_dirs (const char *path, const struct stat *sb,
 int
 main (int argc, char **argv)
 {
-	int c, idx, flags;
+	int c, idx, flags, s;
+	char today[100];
+	time_t rawtime;
+	struct tm *timeinfo;
 
 	while ((c = getopt (argc, argv, "")) != EOF) {
 		switch (c) {
@@ -262,6 +313,33 @@ main (int argc, char **argv)
 	flags = FTW_PHYS;
 
 	if (optind < argc) {
+		time (&rawtime);
+		timeinfo = localtime (&rawtime);
+		sprintf (today, "%04d-%02d-%02d", timeinfo->tm_year + 1900,
+			 timeinfo->tm_mon + 1, timeinfo->tm_mday);
+
+		s = strlen (backup_root) + strlen (today) + 10;
+		if ((backup_dir = calloc (1, s)) == NULL) {
+			fprintf (stderr, "failed to allocate backup_dir\n");
+			return (1);
+		}
+
+		sprintf (backup_dir, "%s/%s", backup_root, today);
+
+		if (mkdir (backup_dir, 0755) == -1) {
+			if (errno != EEXIST) {
+				fprintf (stderr,
+					 "failed to create directory %s: %m\n",
+					 backup_dir);
+				return (1);
+			}
+		}
+
+		if (lchown (backup_dir, 0, 0) == -1) {
+			fprintf (stderr, "failed to chown %s: %m\n",
+				 backup_dir);
+		}
+
 		for (idx = optind; idx < argc; idx++) {
 			if (nftw (argv[idx], mk_backup,
 				  MAX_DIRS_OPEN, flags) == -1) {
