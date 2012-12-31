@@ -27,7 +27,9 @@ struct dir_data {
 	time_t atime, mtime;
 };
 
-struct dir_data *first_dir;
+struct dir_data *first_dir, *collision_dir;
+
+int base_off;
 
 void
 usage (void)
@@ -133,19 +135,19 @@ set_immutable (const char *fn)
 void
 touched_dir (char *path, const struct stat *sb)
 {
-	struct dir_data *dir;
+	struct dir_data *dp;
 
-	dir = xcalloc (1, sizeof *dir);
+	dp = xcalloc (1, sizeof *dp);
 
-	dir->path = xstrdup (path);
-	dir->atime = sb->st_atime;
-	dir->mtime = sb->st_mtime;
+	dp->path = xstrdup (path);
+	dp->atime = sb->st_atime;
+	dp->mtime = sb->st_mtime;
 
 	if (!first_dir) {
-		first_dir = dir;
+		first_dir = dp;
 	} else {
-		dir->next = first_dir;
-		first_dir = dir;
+		dp->next = first_dir;
+		first_dir = dp;
 	}
 }
 
@@ -187,16 +189,19 @@ delete_file_or_dir (char *path)
 }
 
 static int
-mk_backup (const char *path, const struct stat *sb,
+mk_backup (const char *fpath, const struct stat *sb,
 		int tflag, struct FTW *ftwbuf)
 {
 	char buf[1024*1024], dst_name[PATH_MAX], lnk_tar[PATH_MAX],
 		old_tar[PATH_MAX], newbr_name[PATH_MAX], newbr_tar[PATH_MAX],
 		*p;
+	const char *path;
 	struct utimbuf times;
 	FILE *src, *dst;
 	int n_read, r, exists, idx;
 	struct stat dst_sb;
+
+	path = fpath + base_off;
 
 	// add 100 for a safe buffer
 	if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
@@ -448,9 +453,11 @@ fix_dirs (void)
 int
 main (int argc, char **argv)
 {
-	int c, idx, flags, s;
+	int c, idx, flags, l;
+	char *p, *s;
 	time_t rawtime;
 	struct tm *timeinfo;
+	struct dir_data *dp;
 
 	while ((c = getopt (argc, argv, "")) != EOF) {
 		switch (c) {
@@ -462,8 +469,8 @@ main (int argc, char **argv)
 	flags = FTW_PHYS;
 
 	if (optind < argc) {
-		s = strlen (backup_root) + strlen ("newest") + 10;
-		if ((newest = calloc (1, s)) == NULL) {
+		l = strlen (backup_root) + strlen ("newest") + 10;
+		if ((newest = calloc (1, l)) == NULL) {
 			fprintf (stderr, "failed to allocate newest\n");
 			return (1);
 		}
@@ -482,11 +489,11 @@ main (int argc, char **argv)
 		time (&rawtime);
 		timeinfo = localtime (&rawtime);
 		sprintf (backup_branch, "%04d-%02d-%02d",
-			 timeinfo->tm_year + 1900, timeinfo->tm_mon,
-			 timeinfo->tm_mday+1);
+			 timeinfo->tm_year + 1900, timeinfo->tm_mon + 1,
+			 timeinfo->tm_mday);
 
-		s = strlen (backup_root) + strlen (backup_branch) + 10;
-		if ((backup_dir = calloc (1, s)) == NULL) {
+		l = strlen (backup_root) + strlen (backup_branch) + 10;
+		if ((backup_dir = calloc (1, l)) == NULL) {
 			fprintf (stderr, "failed to allocate backup_dir\n");
 			return (1);
 		}
@@ -507,12 +514,30 @@ main (int argc, char **argv)
 				 backup_dir);
 		}
 
+		dp = xcalloc (1, sizeof *dp);
+		dp->path = xstrdup (backup_dir);
+		collision_dir = dp;
+
 		for (idx = optind; idx < argc; idx++) {
+			s = strdup (argv[idx]);
+			l = strlen (s) - 1;
+
+			while (l > 1 && s[l] == '/')
+				s[l--] = 0;
+
+			if ((p = strrchr (s, '/')) != NULL && strlen (p) > 1) {
+				base_off = p - s + 1;
+			} else {
+				base_off = 0;
+			}
+
 			if (nftw (argv[idx], mk_backup,
 				  MAX_DIRS_OPEN, flags) == -1) {
 				fprintf (stderr, "nftw failed\n");
 				return (-1);
 			}
+
+			free (s);
 		}
 
 		fix_dirs ();
