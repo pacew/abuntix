@@ -19,7 +19,7 @@
 #define MAX_DIRS_OPEN 100
 
 char *backup_root = BACKUP_DIR;
-char *backup_dir, *newest;
+char *backup_dir, *newest, backup_branch[100];
 
 struct dir_data {
 	struct dir_data *next;
@@ -150,14 +150,52 @@ touched_dir (char *path, const struct stat *sb)
 }
 
 static int
+delete_subtree (const char *path, const struct stat *sb,
+		int tflag, struct FTW *ftwbuf)
+{
+	if (remove (path) == -1) {
+		fprintf (stderr, "failed to remove old entry %s: %m\n",
+			 path);
+		exit (1);
+	}
+
+	return (0);
+}
+
+void
+delete_file_or_dir (char *path)
+{
+	int flags;
+	struct stat sb;
+
+	if (lstat (path, &sb) == -1) {
+		if (errno == ENOENT) {
+			return;
+		} else {
+			fprintf (stderr, "error with lstat on %s: %m\n", path);
+			exit (1);
+		}
+	}
+
+
+	flags = FTW_PHYS | FTW_DEPTH;
+
+	if (nftw (path, delete_subtree, MAX_DIRS_OPEN, flags) == -1) {
+		fprintf (stderr, "deletion nftw failed\n");
+		return;
+	}
+}
+
+static int
 mk_backup (const char *path, const struct stat *sb,
 		int tflag, struct FTW *ftwbuf)
 {
 	char buf[1024*1024], dst_name[PATH_MAX], lnk_tar[PATH_MAX],
-		old_tar[PATH_MAX], newbr_name[PATH_MAX];
+		old_tar[PATH_MAX], newbr_name[PATH_MAX], newbr_tar[PATH_MAX],
+		*p;
 	struct utimbuf times;
 	FILE *src, *dst;
-	int n_read, r, exists;
+	int n_read, r, exists, idx;
 	struct stat dst_sb;
 
 	// add 100 for a safe buffer
@@ -184,8 +222,20 @@ mk_backup (const char *path, const struct stat *sb,
 		fprintf (stderr, "path exceeds PATH_MAX\n");
 		exit (1);
 	}
-
 	sprintf (newbr_name, "%s/%s", newest, path);
+
+	if (strlen (backup_branch) + strlen (path)
+	    + strlen ("../") * ftwbuf->level + 100 >= PATH_MAX) {
+		fprintf (stderr, "path exceeds PATH_MAX\n");
+		exit (1);
+	}
+
+	p = newbr_tar;
+	for (idx = 0; idx < ftwbuf->level + 1; idx++) {
+		strcpy (p, "../");
+		p += 3;
+	}
+	sprintf (p, "%s/%s", backup_branch, path);
 
 	switch (tflag) {
 	case FTW_F:
@@ -245,15 +295,9 @@ mk_backup (const char *path, const struct stat *sb,
 
 		set_immutable (dst_name);
 
-		if (remove (newbr_name) == -1) {
-			if (errno != ENOENT) {
-				fprintf (stderr, "failed to remove old"
-					 " entry %s: %m\n", newbr_name);
-				return (0);
-			}
-		}
+		delete_file_or_dir (newbr_name);
 
-		if (symlink (dst_name, newbr_name) == -1) {
+		if (symlink (newbr_tar, newbr_name) == -1) {
 			fprintf (stderr, "failed to create symlink %s: %m\n",
 				 newbr_name);
 			return (0);
@@ -292,13 +336,7 @@ mk_backup (const char *path, const struct stat *sb,
 
 		touched_dir (dst_name, sb);
 
-		if (remove (newbr_name) == -1) {
-			if (errno != ENOENT) {
-				fprintf (stderr, "failed to remove old"
-					 " entry %s: %m\n", newbr_name);
-				return (0);
-			}
-		}
+		delete_file_or_dir (newbr_name);
 
 		if (mkdir (newbr_name, sb->st_mode) == -1) {
 			fprintf (stderr, "failed to create directory %s: %m\n",
@@ -369,15 +407,9 @@ mk_backup (const char *path, const struct stat *sb,
 			fprintf (stderr, "failed to chown %s: %m\n", dst_name);
 		}
 
-		if (remove (newbr_name) == -1) {
-			if (errno != ENOENT) {
-				fprintf (stderr, "failed to remove old"
-					 " entry %s: %m\n", newbr_name);
-				return (0);
-			}
-		}
+		delete_file_or_dir (newbr_name);
 
-		if (symlink (dst_name, newbr_name) == -1) {
+		if (symlink (newbr_tar, newbr_name) == -1) {
 			fprintf (stderr, "failed to create symlink %s: %m\n",
 				 newbr_name);
 			return (0);
@@ -417,7 +449,6 @@ int
 main (int argc, char **argv)
 {
 	int c, idx, flags, s;
-	char today[100];
 	time_t rawtime;
 	struct tm *timeinfo;
 
@@ -450,16 +481,17 @@ main (int argc, char **argv)
 
 		time (&rawtime);
 		timeinfo = localtime (&rawtime);
-		sprintf (today, "%04d-%02d-%02d", timeinfo->tm_year + 1900,
-			 timeinfo->tm_mon + 1, timeinfo->tm_mday);
+		sprintf (backup_branch, "%04d-%02d-%02d",
+			 timeinfo->tm_year + 1900, timeinfo->tm_mon,
+			 timeinfo->tm_mday+1);
 
-		s = strlen (backup_root) + strlen (today) + 10;
+		s = strlen (backup_root) + strlen (backup_branch) + 10;
 		if ((backup_dir = calloc (1, s)) == NULL) {
 			fprintf (stderr, "failed to allocate backup_dir\n");
 			return (1);
 		}
 
-		sprintf (backup_dir, "%s/%s", backup_root, today);
+		sprintf (backup_dir, "%s/%s", backup_root, backup_branch);
 
 		if (mkdir (backup_dir, 0755) == -1) {
 			if (errno != EEXIST) {
