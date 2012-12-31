@@ -201,6 +201,10 @@ mk_backup (const char *fpath, const struct stat *sb,
 	int n_read, r, exists, idx;
 	struct stat dst_sb;
 
+	if (strncmp (fpath, backup_root, strlen (backup_root)) == 0) {
+		return (0);
+	}
+
 	path = fpath + base_off;
 
 	// add 100 for a safe buffer
