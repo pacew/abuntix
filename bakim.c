@@ -16,10 +16,18 @@
 #define EXT2_IMMUTABLE_FL 0x00000010
 #define BACKUP_DIR "/big"
 
-#define MAX_DIRS_OPEN 20
+#define MAX_DIRS_OPEN 100
 
 char *backup_root = BACKUP_DIR;
 char *backup_dir;
+
+struct dir_data {
+	struct dir_data *next;
+	char *path;
+	time_t atime, mtime;
+};
+
+struct dir_data *first_dir;
 
 void
 usage (void)
@@ -27,7 +35,34 @@ usage (void)
 	printf ("usage: bakim [FILE]...\n");
 }
 
-int fsetflags (const char * name, unsigned long flags)
+void *
+xcalloc (unsigned int a, unsigned int b)
+{
+	void *p;
+
+	if ((p = calloc (a, b)) == NULL) {
+		fprintf (stderr, "memory error\n");
+		exit (1);
+	}
+
+	return (p);
+}
+
+char *
+xstrdup (char *old)
+{
+	char *new;
+
+	if ((new = strdup (old)) == NULL) {
+		fprintf (stderr, "out of memory\n");
+		exit (1);
+	}
+
+	return (new);
+}
+
+int
+fsetflags (const char * name, unsigned long flags)
 {
 	int fd, r, f, save_errno = 0;
 	struct stat buf;
@@ -75,7 +110,8 @@ notsupp:
 	return -1;
 }
 
-static int set_immutable (const char *fn)
+static int
+set_immutable (const char *fn)
 {
 	unsigned long flags;
 
@@ -91,6 +127,25 @@ static int set_immutable (const char *fn)
 		return -1;
 	}
 	return 0;
+}
+
+void
+touched_dir (char *path, const struct stat *sb)
+{
+	struct dir_data *dir;
+
+	dir = xcalloc (1, sizeof *dir);
+
+	dir->path = xstrdup (path);
+	dir->atime = sb->st_atime;
+	dir->mtime = sb->st_mtime;
+
+	if (!first_dir) {
+		first_dir = dir;
+	} else {
+		dir->next = first_dir;
+		first_dir = dir;
+	}
 }
 
 static int
@@ -128,7 +183,8 @@ mk_backup (const char *path, const struct stat *sb,
 	case FTW_F:
 		if (exists) {
 			if (S_ISREG (sb->st_mode)
-			    && sb->st_mtime == dst_sb.st_mtime) {
+			    && sb->st_mtime == dst_sb.st_mtime
+			    && sb->st_size == dst_sb.st_size) {
 				return (0);
 			} else {
 				fprintf (stderr, "failed to copy %s, %s with"
@@ -184,6 +240,7 @@ mk_backup (const char *path, const struct stat *sb,
 	case FTW_D:
 		if (exists) {
 			if (S_ISDIR (sb->st_mode)) {
+				touched_dir (dst_name, sb);
 				return (0);
 			} else {
 				fprintf (stderr, "failed to create %s, %s"
@@ -203,6 +260,14 @@ mk_backup (const char *path, const struct stat *sb,
 		if (lchown (dst_name, sb->st_uid, sb->st_gid) == -1) {
 			fprintf (stderr, "failed to chown %s: %m\n", dst_name);
 		}
+
+		if (lstat (dst_name, &dst_sb) == -1) {
+			fprintf (stderr, "error with lstat on %s: %m\n",
+				 dst_name);
+			exit (1);
+		}
+
+		touched_dir (dst_name, sb);
 
 		break;
 	case FTW_SL:
@@ -262,37 +327,26 @@ mk_backup (const char *path, const struct stat *sb,
 	return (0);
 }
 
-static int
-fix_dirs (const char *path, const struct stat *sb,
-	  int tflag, struct FTW *ftwbuf)
+void
+fix_dirs (void)
 {
-	char dst_name[PATH_MAX];
+	struct dir_data *dp, *ndp;
 	struct utimbuf times;
 
-	switch (tflag) {
-	case FTW_D:
-		// add 100 for a safe buffer
-		if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
-			fprintf (stderr, "path exceeds PATH_MAX\n");
-			exit (1);
+	for (dp = first_dir; dp; dp = ndp) {
+		ndp = dp->next;
+
+		times.actime = dp->atime;
+		times.modtime = dp->mtime;
+
+		if (utime (dp->path, &times) == -1) {
+			fprintf (stderr, "failed to set timestamp on %s: %m\n",
+				dp->path);
 		}
 
-		sprintf (dst_name, "%s/%s", backup_dir, path);
-
-		times.actime = sb->st_atime;
-		times.modtime = sb->st_mtime;
-
-		if (utime (dst_name, &times) == -1) {
-			fprintf (stderr, "failed to set timestamps on %s: %m\n",
-				 dst_name);
-		}
-
-		break;
-	default:
-		break;
+		free (dp->path);
+		free (dp);
 	}
-
-	return (0);
 }
 
 int
@@ -348,13 +402,7 @@ main (int argc, char **argv)
 			}
 		}
 
-		for (idx = optind; idx < argc; idx++) {
-			if (nftw (argv[idx], fix_dirs,
-				  MAX_DIRS_OPEN, flags) == -1) {
-				fprintf (stderr, "nftw failed\n");
-				return (-1);
-			}
-		}
+		fix_dirs ();
 	} else {
 		usage ();
 	}
