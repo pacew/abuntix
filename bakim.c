@@ -27,7 +27,7 @@ struct dir_data {
 	time_t atime, mtime;
 };
 
-struct dir_data *first_dir, *collision_dir;
+struct dir_data *first_dir, *first_collision_dir, *last_collision_dir;
 
 int base_off;
 
@@ -129,7 +129,8 @@ set_immutable (const char *fn)
 		printf ("failed to set flags for %s\n", fn);
 		return -1;
 	}
-	return 0;
+
+	return (0);
 }
 
 void
@@ -188,17 +189,184 @@ delete_file_or_dir (char *path)
 	}
 }
 
+void
+copy_file (const char *src_fn, char *dst_fn)
+{
+	int n_read;
+	FILE *src, *dst;
+	char buf[1024*1024];
+
+	if ((src = fopen (src_fn, "r")) == NULL) {
+		printf ("cannot open src file %s\n", src_fn);
+		exit (1);
+
+	}
+
+	if ((dst = fopen (dst_fn, "w")) == NULL) {
+		fprintf (stderr, "cannot open dst file %s\n", dst_fn);
+		exit (1);
+	}
+
+	while ((n_read = fread (buf, 1, sizeof buf, src)) > 0) {
+		if (fwrite (buf, 1, n_read, dst) != n_read) {
+			fprintf (stderr, "error copying file:"
+				 " potentially out of space\n");
+			exit (1);
+		}
+	}
+
+	if (fclose (src) != 0) {
+		fprintf (stderr, "error closing file %s: %m", src_fn);
+		exit (1);
+	}
+	if (fclose (dst) != 0) {
+		fprintf (stderr, "error closing file %s: %m", dst_fn);
+		exit (1);
+	}
+}
+
+char *
+base26 (int c)
+{
+	char s[3];
+
+	s[0] = (int) (c / 26) + 'a';
+	s[1] = (c % 26) + 'a';
+	s[2] = 0;
+
+	return (xstrdup (s));
+}
+
+void
+fallback_backup (const char *fpath, const struct stat *sb,
+		 int tflag, struct FTW *ftwbuf, char *newbr_name)
+{
+	char dst_name[PATH_MAX], *suffix, *p, newbr_tar[PATH_MAX];
+	const char *path;
+	int count, idx;
+	struct dir_data *dp;
+	struct stat dst_sb;
+	struct utimbuf times;
+
+	path = fpath + base_off;
+
+	count = 0;
+
+	for (dp = first_collision_dir; dp; dp = dp->next) {
+		if (strlen (dp->path) + strlen (path) + 100 >= PATH_MAX) {
+			fprintf (stderr, "path exceeds PATH_MAX\n");
+			exit (1);
+		}
+
+		sprintf (dst_name, "%s/%s", dp->path, path);
+
+		if (lstat (dst_name, &dst_sb) == -1) {
+			if (errno == ENOENT) {
+				goto do_cp;
+			} else {
+				fprintf (stderr, "error with lstat on %s: %m\n",
+					 dst_name);
+				exit (1);
+			}
+		}
+
+		count++;
+	}
+
+	while (count < 675) {
+		dp = xcalloc (1, sizeof *dp);
+		dp->path = xcalloc (1, strlen (backup_dir) + 10);
+
+		suffix = base26 (count);
+		sprintf (dp->path, "%s-%s", backup_dir, suffix);
+		free (suffix);
+
+		if (lstat (dp->path, &dst_sb) == -1) {
+			if (errno == ENOENT)
+				break;
+
+			fprintf (stderr, "error with lstat on %s: %m\n",
+				 dp->path);
+			exit (1);
+		}
+
+		if (!first_collision_dir)
+			first_collision_dir = dp;
+
+		if (last_collision_dir)
+			last_collision_dir->next = dp;
+
+		last_collision_dir = dp;
+
+		count++;
+	}
+
+	if (count >= 675) {
+		fprintf (stderr, "maximum file duplicates on the"
+			 " same day exceeded for file %s\n", fpath);
+		exit (1);
+	}
+
+	if (mkdir (dp->path, 0755) == -1) {
+		fprintf (stderr, "failed to create directory %s: %m\n",
+			 dp->path);
+		exit (1);
+	}
+
+	if (strlen (dp->path) + strlen (path) + 100 >= PATH_MAX) {
+		fprintf (stderr, "path exceeds PATH_MAX\n");
+		exit (1);
+	}
+
+	sprintf (dst_name, "%s/%s", dp->path, path);
+
+do_cp:
+	if (strlen (dp->path) + strlen (path)
+	    + strlen ("../") * ftwbuf->level + 100 >= PATH_MAX) {
+		fprintf (stderr, "path exceeds PATH_MAX\n");
+		exit (1);
+	}
+
+	p = newbr_tar;
+	for (idx = 0; idx < ftwbuf->level + 1; idx++) {
+		strcpy (p, "../");
+		p += 3;
+	}
+	sprintf (p, "%s/%s", dp->path + strlen (backup_root) + 1, path);
+
+	copy_file (fpath, dst_name);
+
+	times.actime = sb->st_atime;
+	times.modtime = sb->st_mtime;
+
+	if (utime (dst_name, &times) == -1) {
+		fprintf (stderr, "failed to set timestamps on %s: %m\n",
+			 dst_name);
+	}
+
+	if (lchown (dst_name, sb->st_uid, sb->st_gid) == -1) {
+		fprintf (stderr, "failed to chown %s: %m\n", dst_name);
+	}
+
+	set_immutable (dst_name);
+
+	delete_file_or_dir (newbr_name);
+
+	if (symlink (newbr_tar, newbr_name) == -1) {
+		fprintf (stderr, "failed to create symlink %s: %m\n",
+			 newbr_name);
+	}
+}
+
 static int
 mk_backup (const char *fpath, const struct stat *sb,
 		int tflag, struct FTW *ftwbuf)
 {
-	char buf[1024*1024], dst_name[PATH_MAX], lnk_tar[PATH_MAX],
-		old_tar[PATH_MAX], newbr_name[PATH_MAX], newbr_tar[PATH_MAX],
-		*p;
+	char dst_name[PATH_MAX], lnk_tar[PATH_MAX], old_tar[PATH_MAX],
+		newbr_name[PATH_MAX], newbr_tar[PATH_MAX], *p;
 	const char *path;
 	struct utimbuf times;
-	FILE *src, *dst;
-	int n_read, r, exists, idx;
+	int r, exists, idx;
 	struct stat dst_sb;
 
 	if (strncmp (fpath, backup_root, strlen (backup_root)) == 0) {
@@ -207,7 +375,6 @@ mk_backup (const char *fpath, const struct stat *sb,
 
 	path = fpath + base_off;
 
-	// add 100 for a safe buffer
 	if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
 		fprintf (stderr, "path exceeds PATH_MAX\n");
 		exit (1);
@@ -254,41 +421,13 @@ mk_backup (const char *fpath, const struct stat *sb,
 			    && sb->st_size == dst_sb.st_size) {
 				return (0);
 			} else {
-				fprintf (stderr, "failed to copy %s, %s with"
-					 " same name already exists\n",
-					 dst_name, S_ISREG (sb->st_mode)
-					 ? "file" : "dir");
+				fallback_backup (fpath, sb, tflag, ftwbuf,
+						 newbr_name);
 				return (0);
 			}
 		}
 
-		if ((src = fopen (path, "r")) == NULL) {
-			printf ("cannot open src file %s\n", path);
-			exit (1);
-
-		}
-
-		if ((dst = fopen (dst_name, "w")) == NULL) {
-			fprintf (stderr, "cannot open dst file %s\n", dst_name);
-			exit (1);
-		}
-
-		while ((n_read = fread (buf, 1, sizeof buf, src)) > 0) {
-			if (fwrite (buf, 1, n_read, dst) != n_read) {
-				fprintf (stderr, "error copying file:"
-					 " potentially out of space\n");
-				exit (1);
-			}
-		}
-
-		if (fclose (src) != 0) {
-			fprintf (stderr, "error closing file %s: %m", path);
-			exit (1);
-		}
-		if (fclose (dst) != 0) {
-			fprintf (stderr, "error closing file %s: %m", dst_name);
-			exit (1);
-		}
+		copy_file (fpath, dst_name);
 
 		times.actime = sb->st_atime;
 		times.modtime = sb->st_mtime;
@@ -368,7 +507,7 @@ mk_backup (const char *fpath, const struct stat *sb,
 
 		break;
 	case FTW_SL:
-		r = readlink (path, lnk_tar, sb->st_size + 1);
+		r = readlink (fpath, lnk_tar, sb->st_size + 1);
 
 		if (r < 0) {
 			fprintf (stderr, "failed to read link %s: %m\n",
@@ -461,7 +600,7 @@ main (int argc, char **argv)
 	char *p, *s;
 	time_t rawtime;
 	struct tm *timeinfo;
-	struct dir_data *dp;
+	struct dir_data *dp, *ndp;
 
 	while ((c = getopt (argc, argv, "")) != EOF) {
 		switch (c) {
@@ -518,10 +657,6 @@ main (int argc, char **argv)
 				 backup_dir);
 		}
 
-		dp = xcalloc (1, sizeof *dp);
-		dp->path = xstrdup (backup_dir);
-		collision_dir = dp;
-
 		for (idx = optind; idx < argc; idx++) {
 			s = strdup (argv[idx]);
 			l = strlen (s) - 1;
@@ -539,6 +674,15 @@ main (int argc, char **argv)
 				  MAX_DIRS_OPEN, flags) == -1) {
 				fprintf (stderr, "nftw failed\n");
 				return (-1);
+			}
+
+			if (first_collision_dir) {
+				for (dp = first_collision_dir; dp; dp = ndp) {
+					ndp = dp->next;
+
+					free (dp->path);
+					free (dp);
+				}
 			}
 
 			free (s);
