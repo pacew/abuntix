@@ -19,7 +19,7 @@
 #define MAX_DIRS_OPEN 100
 
 char *backup_root = BACKUP_DIR;
-char *backup_dir;
+char *backup_dir, *newest;
 
 struct dir_data {
 	struct dir_data *next;
@@ -88,7 +88,8 @@ notsupp:
 	return -1;
 }
 
-int fgetflags (const char * name, unsigned long * flags)
+int
+fgetflags (const char * name, unsigned long * flags)
 {
 	struct stat buf;
 
@@ -153,7 +154,7 @@ mk_backup (const char *path, const struct stat *sb,
 		int tflag, struct FTW *ftwbuf)
 {
 	char buf[1024*1024], dst_name[PATH_MAX], lnk_tar[PATH_MAX],
-		old_tar[PATH_MAX];
+		old_tar[PATH_MAX], newbr_name[PATH_MAX];
 	struct utimbuf times;
 	FILE *src, *dst;
 	int n_read, r, exists;
@@ -178,6 +179,13 @@ mk_backup (const char *path, const struct stat *sb,
 	} else {
 		exists = 1;
 	}
+
+	if (strlen (newest) + strlen (path) + 100 >= PATH_MAX) {
+		fprintf (stderr, "path exceeds PATH_MAX\n");
+		exit (1);
+	}
+
+	sprintf (newbr_name, "%s/%s", newest, path);
 
 	switch (tflag) {
 	case FTW_F:
@@ -236,6 +244,21 @@ mk_backup (const char *path, const struct stat *sb,
 		}
 
 		set_immutable (dst_name);
+
+		if (remove (newbr_name) == -1) {
+			if (errno != ENOENT) {
+				fprintf (stderr, "failed to remove old"
+					 " entry %s: %m\n", newbr_name);
+				return (0);
+			}
+		}
+
+		if (symlink (dst_name, newbr_name) == -1) {
+			fprintf (stderr, "failed to create symlink %s: %m\n",
+				 newbr_name);
+			return (0);
+		}
+
 		break;
 	case FTW_D:
 		if (exists) {
@@ -268,6 +291,33 @@ mk_backup (const char *path, const struct stat *sb,
 		}
 
 		touched_dir (dst_name, sb);
+
+		if (remove (newbr_name) == -1) {
+			if (errno != ENOENT) {
+				fprintf (stderr, "failed to remove old"
+					 " entry %s: %m\n", newbr_name);
+				return (0);
+			}
+		}
+
+		if (mkdir (newbr_name, sb->st_mode) == -1) {
+			fprintf (stderr, "failed to create directory %s: %m\n",
+				 newbr_name);
+			return (0);
+		}
+
+		if (lchown (newbr_name, sb->st_uid, sb->st_gid) == -1) {
+			fprintf (stderr, "failed to chown %s: %m\n",
+				 newbr_name);
+		}
+
+		if (lstat (newbr_name, &dst_sb) == -1) {
+			fprintf (stderr, "error with lstat on %s: %m\n",
+				 newbr_name);
+			exit (1);
+		}
+
+		touched_dir (newbr_name, sb);
 
 		break;
 	case FTW_SL:
@@ -319,6 +369,20 @@ mk_backup (const char *path, const struct stat *sb,
 			fprintf (stderr, "failed to chown %s: %m\n", dst_name);
 		}
 
+		if (remove (newbr_name) == -1) {
+			if (errno != ENOENT) {
+				fprintf (stderr, "failed to remove old"
+					 " entry %s: %m\n", newbr_name);
+				return (0);
+			}
+		}
+
+		if (symlink (dst_name, newbr_name) == -1) {
+			fprintf (stderr, "failed to create symlink %s: %m\n",
+				 newbr_name);
+			return (0);
+		}
+
 		break;
 	default:
 		return (0);
@@ -367,6 +431,23 @@ main (int argc, char **argv)
 	flags = FTW_PHYS;
 
 	if (optind < argc) {
+		s = strlen (backup_root) + strlen ("newest") + 10;
+		if ((newest = calloc (1, s)) == NULL) {
+			fprintf (stderr, "failed to allocate newest\n");
+			return (1);
+		}
+
+		sprintf (newest, "%s/%s", backup_root, "newest");
+
+		if (mkdir (newest, 0755) == -1) {
+			if (errno != EEXIST) {
+				fprintf (stderr,
+					 "failed to create directory %s: %m\n",
+					 newest);
+					return (1);
+			}
+		}
+
 		time (&rawtime);
 		timeinfo = localtime (&rawtime);
 		sprintf (today, "%04d-%02d-%02d", timeinfo->tm_year + 1900,
@@ -406,7 +487,6 @@ main (int argc, char **argv)
 	} else {
 		usage ();
 	}
-
 
 	return (0);
 }
