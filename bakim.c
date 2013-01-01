@@ -226,11 +226,9 @@ copy_file (const char *src_fn, char *dst_fn)
 }
 
 char *
-base26 (int c)
+base26 (int c, char *s)
 {
-	char s[3];
-
-	s[0] = (int) (c / 26) + 'a';
+	s[0] = (int) ((c % (26 * 26)) / 26) + 'a';
 	s[1] = (c % 26) + 'a';
 	s[2] = 0;
 
@@ -241,7 +239,7 @@ void
 fallback_backup (const char *fpath, const struct stat *sb,
 		 int tflag, struct FTW *ftwbuf, char *newbr_name)
 {
-	char dst_name[PATH_MAX], *suffix, *p, newbr_tar[PATH_MAX];
+	char dst_name[PATH_MAX], suffix[3], *p, newbr_tar[PATH_MAX];
 	const char *path;
 	int count, idx;
 	struct dir_data *dp;
@@ -273,13 +271,12 @@ fallback_backup (const char *fpath, const struct stat *sb,
 		count++;
 	}
 
-	while (count < 675) {
+	while (count <= 675) {
 		dp = xcalloc (1, sizeof *dp);
 		dp->path = xcalloc (1, strlen (backup_dir) + 10);
 
-		suffix = base26 (count);
+		base26 (count, suffix);
 		sprintf (dp->path, "%s-%s", backup_dir, suffix);
-		free (suffix);
 
 		if (lstat (dp->path, &dst_sb) == -1) {
 			if (errno == ENOENT)
