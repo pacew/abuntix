@@ -25,6 +25,7 @@ struct dir_data {
 	struct dir_data *next;
 	char *path;
 	time_t atime, mtime;
+	int mode;
 };
 
 struct dir_data *first_dir, *first_collision_dir, *last_collision_dir;
@@ -143,6 +144,7 @@ touched_dir (char *path, const struct stat *sb)
 	dp->path = xstrdup (path);
 	dp->atime = sb->st_atime;
 	dp->mtime = sb->st_mtime;
+	dp->mode = sb->st_mode;
 
 	if (!first_dir) {
 		first_dir = dp;
@@ -235,19 +237,88 @@ base26 (int c, char *s)
 	return (xstrdup (s));
 }
 
-void
-fallback_backup (const char *fpath, const struct stat *sb,
-		 int tflag, struct FTW *ftwbuf, char *newbr_name)
+struct dir_data *
+find_dir (const char *path)
 {
-	char dst_name[PATH_MAX], suffix[3], *p, newbr_tar[PATH_MAX];
-	const char *path;
-	int count, idx;
 	struct dir_data *dp;
+
+	for (dp = first_dir; dp; dp = dp->next) {
+		if (strcmp (path, dp->path) == 0) {
+			return (dp);
+		}
+	}
+
+	fprintf (stderr, "touched directories path corrupted, unable to find"
+		 " %s. exiting\n", path);
+	exit (1);
+}
+
+int
+build_path (const char *path, struct dir_data *dp)
+{
+	const char *s;
+	char *p, new[PATH_MAX], dir_name[PATH_MAX], orig_dir[PATH_MAX];
+	struct stat sb;
+	struct dir_data *dir;
+
+	s = path;
+
+	while ((p = strchr (s, '/')) != NULL) {
+		strncpy (new, path, p - path);
+		new[p-path] = 0;
+
+		if (strlen (dp->path) + strlen (new) + 100 >= PATH_MAX) {
+			fprintf (stderr, "path exceeds PATH_MAX\n");
+			exit (1);
+		}
+
+		sprintf (dir_name, "%s/%s", dp->path, new);
+
+		if (lstat (dir_name, &sb) == -1) {
+			if (errno != ENOENT) {
+				fprintf (stderr, "error with lstat on %s: %m\n",
+					 new);
+				exit (1);
+			}
+
+			if (strlen (backup_dir) + strlen (new)
+			    + 100 >= PATH_MAX) {
+				fprintf (stderr, "path exceeds PATH_MAX\n");
+				exit (1);
+			}
+
+			sprintf (orig_dir, "%s/%s", backup_dir, new);
+			dir = find_dir (orig_dir);
+
+			if (mkdir (dir_name, dir->mode) == -1) {
+				fprintf (stderr, "failed to create"
+					 " directory %s: %m\n", dir_name);
+				exit (1);
+			}
+		} else {
+			if (!S_ISDIR (sb.st_mode))
+				return (-1);
+		}
+
+		while (*p == '/')
+			p++;
+
+		s = p;
+	}
+
+	return (0);
+}
+
+struct dir_data *
+find_slot (const char *fpath)
+{
+	int count;
+	struct dir_data *dp;
+	char dst_name[PATH_MAX], suffix[3];
+	const char *path;
 	struct stat dst_sb;
-	struct utimbuf times;
 
 	path = fpath + base_off;
-
 	count = 0;
 
 	for (dp = first_collision_dir; dp; dp = dp->next) {
@@ -259,13 +330,14 @@ fallback_backup (const char *fpath, const struct stat *sb,
 		sprintf (dst_name, "%s/%s", dp->path, path);
 
 		if (lstat (dst_name, &dst_sb) == -1) {
-			if (errno == ENOENT) {
-				goto do_cp;
-			} else {
+			if (errno != ENOENT) {
 				fprintf (stderr, "error with lstat on %s: %m\n",
 					 dst_name);
 				exit (1);
 			}
+
+			if (build_path (path, dp) != -1)
+				return (dp);
 		}
 
 		count++;
@@ -279,12 +351,14 @@ fallback_backup (const char *fpath, const struct stat *sb,
 		sprintf (dp->path, "%s-%s", backup_dir, suffix);
 
 		if (lstat (dp->path, &dst_sb) == -1) {
-			if (errno == ENOENT)
-				break;
+			if (errno != ENOENT) {
+				fprintf (stderr, "error with lstat on %s: %m\n",
+					 dp->path);
+				exit (1);
+			}
 
-			fprintf (stderr, "error with lstat on %s: %m\n",
-				 dp->path);
-			exit (1);
+			if (build_path (path, dp) != -1)
+				return (dp);
 		}
 
 		if (!first_collision_dir)
@@ -310,6 +384,23 @@ fallback_backup (const char *fpath, const struct stat *sb,
 		exit (1);
 	}
 
+	return (dp);
+}
+
+void
+fallback_backup (const char *fpath, const struct stat *sb,
+		 int tflag, struct FTW *ftwbuf, char *newbr_name)
+{
+	char dst_name[PATH_MAX], *p, newbr_tar[PATH_MAX];
+	const char *path;
+	int idx;
+	struct dir_data *dp;
+	struct utimbuf times;
+
+	path = fpath + base_off;
+
+	dp = find_slot (fpath);
+
 	if (strlen (dp->path) + strlen (path) + 100 >= PATH_MAX) {
 		fprintf (stderr, "path exceeds PATH_MAX\n");
 		exit (1);
@@ -317,7 +408,6 @@ fallback_backup (const char *fpath, const struct stat *sb,
 
 	sprintf (dst_name, "%s/%s", dp->path, path);
 
-do_cp:
 	if (strlen (dp->path) + strlen (path)
 	    + strlen ("../") * ftwbuf->level + 100 >= PATH_MAX) {
 		fprintf (stderr, "path exceeds PATH_MAX\n");
@@ -588,6 +678,8 @@ fix_dirs (void)
 		free (dp->path);
 		free (dp);
 	}
+
+	first_dir = 0;
 }
 
 int
@@ -683,9 +775,9 @@ main (int argc, char **argv)
 			}
 
 			free (s);
-		}
 
-		fix_dirs ();
+			fix_dirs ();
+		}
 	} else {
 		usage ();
 	}
