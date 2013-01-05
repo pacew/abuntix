@@ -177,7 +177,7 @@ delete_file_or_dir (char *path)
 		if (errno == ENOENT) {
 			return;
 		} else {
-			fprintf (stderr, "error with lstat on %s: %m\n", path);
+			fprintf (stderr, "%d: error with lstat on %s: %m\n", __LINE__, path);
 			exit (1);
 		}
 	}
@@ -286,8 +286,8 @@ pave_path (const char *path, struct dir_data *dp)
 
 		if (lstat (dir_name, &sb) == -1) {
 			if (errno != ENOENT) {
-				fprintf (stderr, "error with lstat on %s: %m\n",
-					 new);
+				fprintf (stderr, "%d: error with lstat on %s: %m\n",
+					 __LINE__, 					 new);
 				exit (1);
 			}
 
@@ -340,8 +340,8 @@ find_slot (const char *fpath, const struct stat *sb)
 		sprintf (dst_name, "%s/%s", dp->path, path);
 		if (lstat (dst_name, &dst_sb) == -1) {
 			if (errno != ENOENT) {
-				fprintf (stderr, "error with lstat on %s: %m\n",
-					 dst_name);
+				fprintf (stderr, "%d: error with lstat on %s: %m\n",
+					 __LINE__, 					 dst_name);
 				exit (1);
 			}
 
@@ -409,8 +409,8 @@ find_slot (const char *fpath, const struct stat *sb)
 
 		if (lstat (dp->path, &dst_sb) == -1) {
 			if (errno != ENOENT) {
-				fprintf (stderr, "error with lstat on %s: %m\n",
-					 dp->path);
+				fprintf (stderr, "%d: error with lstat on %s: %m\n",
+					 __LINE__, 					 dp->path);
 				exit (1);
 			}
 
@@ -433,8 +433,8 @@ find_slot (const char *fpath, const struct stat *sb)
 		sprintf (dst_name, "%s/%s", dp->path, path);
 		if (lstat (dst_name, &dst_sb) == -1) {
 			if (errno != ENOENT) {
-				fprintf (stderr, "error with lstat on %s: %m\n",
-					 dst_name);
+				fprintf (stderr, "%d: error with lstat on %s: %m\n",
+					 __LINE__, 					 dst_name);
 				exit (1);
 			}
 
@@ -546,6 +546,70 @@ fallback_backup (const char *fpath, const struct stat *sb,
 	}
 }
 
+int
+check_same (const struct stat *a, const struct stat *b,
+	    const char *a_path, const char *b_path)
+{
+	int mask, r;
+	char a_tar[PATH_MAX], b_tar[PATH_MAX];
+
+	mask = 0777;
+
+	if (S_ISREG (a->st_mode) && S_ISREG (b->st_mode)) {
+		if (a->st_mtime == b->st_mtime && a->st_size == b->st_size
+		    && (a->st_mode & mask) == (b->st_mode & mask)
+		    && a->st_uid == b->st_uid && a->st_gid == b->st_gid) {
+			return (1);
+		}
+	} else if (S_ISDIR (a->st_mode) && S_ISDIR (b->st_mode)) {
+		if (a->st_mtime == b->st_mtime
+		    && (a->st_mode & mask) == (b->st_mode & mask)
+		    && a->st_uid == b->st_uid && a->st_gid == b->st_gid) {
+			return (1);
+		}
+	} else if (S_ISLNK (a->st_mode) && S_ISLNK (b->st_mode)) {
+		if (a->st_uid != b->st_uid || a->st_gid != b->st_gid)
+			return (0);
+
+		r = readlink (a_path, a_tar, a->st_size + 1);
+
+		if (r < 0) {
+			fprintf (stderr, "failed to read link %s: %m\n",
+				 a_path);
+			exit (1);
+		}
+
+		if (r > a->st_size) {
+			fprintf (stderr, "symlink increased in size"
+				 " between lstat and readlink\n");
+			exit (1);
+		}
+
+		b_tar[b->st_size] = 0;
+
+		r = readlink (b_path, b_tar, b->st_size + 1);
+
+		if (r < 0) {
+			fprintf (stderr, "failed to read link %s: %m\n",
+				 b_path);
+			exit (1);
+		}
+
+		if (r > b->st_size) {
+			fprintf (stderr, "symlink increased in size"
+				 " between lstat and readlink\n");
+			exit (1);
+		}
+
+		b_tar[b->st_size] = 0;
+
+		if (strcmp (a_tar, b_tar) == 0)
+			return (1);
+	}
+
+	return (0);
+}
+
 static int
 mk_backup (const char *fpath, const struct stat *sb,
 		int tflag, struct FTW *ftwbuf)
@@ -575,8 +639,8 @@ mk_backup (const char *fpath, const struct stat *sb,
 		if (errno == ENOENT) {
 			exists = 0;
 		} else {
-			fprintf (stderr, "error with lstat on %s: %m\n",
-				 dst_name);
+			fprintf (stderr, "%d: error with lstat on %s: %m\n",
+				 __LINE__, 				 dst_name);
 			exit (1);
 		}
 	} else {
@@ -666,8 +730,8 @@ mk_backup (const char *fpath, const struct stat *sb,
 		}
 
 		if (lstat (dst_name, &dst_sb) == -1) {
-			fprintf (stderr, "error with lstat on %s: %m\n",
-				 dst_name);
+			fprintf (stderr, "%d: error with lstat on %s: %m\n",
+				 __LINE__, 				 dst_name);
 			exit (1);
 		}
 
@@ -687,8 +751,8 @@ mk_backup (const char *fpath, const struct stat *sb,
 		}
 
 		if (lstat (newbr_name, &dst_sb) == -1) {
-			fprintf (stderr, "error with lstat on %s: %m\n",
-				 newbr_name);
+			fprintf (stderr, "%d: error with lstat on %s: %m\n",
+				 __LINE__, 				 newbr_name);
 			exit (1);
 		}
 
