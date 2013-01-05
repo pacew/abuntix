@@ -14,3 +14,7 @@ caps:
 
 clean:
 	rm -f *.o abuntix-setup bakim
+
+clear:
+	-chattr -Rf -i /big 2>/dev/null
+	rm -rf /big/*

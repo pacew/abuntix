@@ -14,11 +14,11 @@
 #include <time.h>
 
 #define EXT2_IMMUTABLE_FL 0x00000010
-#define BACKUP_DIR "/big"
+#define BACKUP_ROOT "/big"
 
 #define MAX_DIRS_OPEN 100
 
-char *backup_root = BACKUP_DIR;
+char *backup_root = BACKUP_ROOT;
 char *backup_dir, *newest, backup_branch[100];
 
 struct dir_data {
@@ -254,25 +254,35 @@ find_dir (const char *path)
 }
 
 int
-build_path (const char *path, struct dir_data *dp)
+pave_path (const char *path, struct dir_data *dp)
 {
-	const char *s;
-	char *p, new[PATH_MAX], dir_name[PATH_MAX], orig_dir[PATH_MAX];
+	char *s, *p, new[PATH_MAX], dir_name[PATH_MAX], orig_dir[PATH_MAX];
 	struct stat sb;
 	struct dir_data *dir;
 
-	s = path;
+	s = strdup (path);
+	p = s;
 
-	while ((p = strchr (s, '/')) != NULL) {
-		strncpy (new, path, p - path);
-		new[p-path] = 0;
+	while (*p == '/')
+		p++;
 
-		if (strlen (dp->path) + strlen (new) + 100 >= PATH_MAX) {
+	while (1) {
+		while (*p && *p != '/')
+			p++;
+
+		if (*p == 0)
+			break;
+
+		*p = 0;
+
+		printf ("%s\n", s);
+
+		if (strlen (dp->path) + strlen (s) + 100 >= PATH_MAX) {
 			fprintf (stderr, "path exceeds PATH_MAX\n");
 			exit (1);
 		}
 
-		sprintf (dir_name, "%s/%s", dp->path, new);
+		sprintf (dir_name, "%s/%s", dp->path, s);
 
 		if (lstat (dir_name, &sb) == -1) {
 			if (errno != ENOENT) {
@@ -281,13 +291,13 @@ build_path (const char *path, struct dir_data *dp)
 				exit (1);
 			}
 
-			if (strlen (backup_dir) + strlen (new)
+			if (strlen (backup_dir) + strlen (s)
 			    + 100 >= PATH_MAX) {
 				fprintf (stderr, "path exceeds PATH_MAX\n");
 				exit (1);
 			}
 
-			sprintf (orig_dir, "%s/%s", backup_dir, new);
+			sprintf (orig_dir, "%s/%s", backup_dir, s);
 			dir = find_dir (orig_dir);
 
 			if (mkdir (dir_name, dir->mode) == -1) {
@@ -300,17 +310,17 @@ build_path (const char *path, struct dir_data *dp)
 				return (-1);
 		}
 
+		*p = '/';
+
 		while (*p == '/')
 			p++;
-
-		s = p;
 	}
 
 	return (0);
 }
 
 struct dir_data *
-find_slot (const char *fpath)
+find_slot (const char *fpath, const struct stat *sb)
 {
 	int count;
 	struct dir_data *dp;
@@ -328,7 +338,6 @@ find_slot (const char *fpath)
 		}
 
 		sprintf (dst_name, "%s/%s", dp->path, path);
-
 		if (lstat (dst_name, &dst_sb) == -1) {
 			if (errno != ENOENT) {
 				fprintf (stderr, "error with lstat on %s: %m\n",
@@ -336,8 +345,48 @@ find_slot (const char *fpath)
 				exit (1);
 			}
 
-			if (build_path (path, dp) != -1)
+			if (pave_path (path, dp) != -1)
 				return (dp);
+		} else {
+			if (S_ISREG (sb->st_mode)) {
+				if (S_ISREG (dst_sb.st_mode)
+				    && sb->st_mtime == dst_sb.st_mtime
+				    && sb->st_size == dst_sb.st_size) {
+					return (NULL);
+				} else {
+					continue;
+				}
+			} else if (S_ISDIR (sb->st_mode)) {
+				if (S_ISDIR (dst_sb.st_mode)) {
+					return (NULL);
+				} else {
+					continue;
+				}
+			} else if (S_ISLNK (sb->st_mode)) {
+				/* if (!S_ISLNK (dst_sb.st_mode)) */
+				/* 	continue; */
+
+				/* r = readlink (fpath, lnk_tar, sb->st_size + 1); */
+
+				/* if (r < 0) { */
+				/* 	fprintf (stderr, "failed to read link" */
+				/* 		 " %s: %m\n"); */
+				/* 	exit (1); */
+				/* } */
+
+				/* if (r > sb->st_size) { */
+				/* 	fprintf (stderr, "symlink incrased in" */
+				/* 		 " size between lstat and" */
+				/* 		 " readlink\n"); */
+				/* 	exit (1); */
+				/* } */
+
+				/* lnk_tar[sb->st_size] = 0; */
+
+				/* r = readlink (dst_name, old_tar, sb->st_size + 1) */
+				fprintf (stderr, "links not supported yet\n");
+				exit (1);
+			}
 		}
 
 		count++;
@@ -350,17 +399,6 @@ find_slot (const char *fpath)
 		base26 (count, suffix);
 		sprintf (dp->path, "%s-%s", backup_dir, suffix);
 
-		if (lstat (dp->path, &dst_sb) == -1) {
-			if (errno != ENOENT) {
-				fprintf (stderr, "error with lstat on %s: %m\n",
-					 dp->path);
-				exit (1);
-			}
-
-			if (build_path (path, dp) != -1)
-				return (dp);
-		}
-
 		if (!first_collision_dir)
 			first_collision_dir = dp;
 
@@ -369,22 +407,85 @@ find_slot (const char *fpath)
 
 		last_collision_dir = dp;
 
+		if (lstat (dp->path, &dst_sb) == -1) {
+			if (errno != ENOENT) {
+				fprintf (stderr, "error with lstat on %s: %m\n",
+					 dp->path);
+				exit (1);
+			}
+
+			if (mkdir (dp->path, 0755) == -1) {
+				fprintf (stderr, "failed to create directory %s: %m\n",
+					 dp->path);
+				exit (1);
+			}
+
+			if (pave_path (path, dp) != -1)
+				return (dp);
+		}
+
+
+		if (strlen (dp->path) + strlen (path) + 100 >= PATH_MAX) {
+			fprintf (stderr, "path exceeds PATH_MAX\n");
+			exit (1);
+		}
+
+		sprintf (dst_name, "%s/%s", dp->path, path);
+		if (lstat (dst_name, &dst_sb) == -1) {
+			if (errno != ENOENT) {
+				fprintf (stderr, "error with lstat on %s: %m\n",
+					 dst_name);
+				exit (1);
+			}
+
+			if (pave_path (path, dp) != -1)
+				return (dp);
+		} else {
+			if (S_ISREG (sb->st_mode)) {
+				if (S_ISREG (dst_sb.st_mode)
+				    && sb->st_mtime == dst_sb.st_mtime
+				    && sb->st_size == dst_sb.st_size) {
+					return (NULL);
+				} else {
+					continue;
+				}
+			} else if (S_ISDIR (sb->st_mode)) {
+				if (S_ISDIR (dst_sb.st_mode)) {
+					return (NULL);
+				} else {
+					continue;
+				}
+			} else if (S_ISLNK (sb->st_mode)) {
+				/* if (!S_ISLNK (dst_sb.st_mode)) */
+				/* 	continue; */
+
+				/* r = readlink (fpath, lnk_tar, sb->st_size + 1); */
+
+				/* if (r < 0) { */
+				/* 	fprintf (stderr, "failed to read link" */
+				/* 		 " %s: %m\n"); */
+				/* 	exit (1); */
+				/* } */
+
+				/* if (r > sb->st_size) { */
+				/* 	fprintf (stderr, "symlink incrased in" */
+				/* 		 " size between lstat and" */
+				/* 		 " readlink\n"); */
+				/* 	exit (1); */
+				/* } */
+
+				/* lnk_tar[sb->st_size] = 0; */
+
+				/* r = readlink (dst_name, old_tar, sb->st_size + 1) */
+				fprintf (stderr, "links not supported yet\n");
+				exit (1);
+			}
+		}
+
 		count++;
 	}
 
-	if (count >= 675) {
-		fprintf (stderr, "maximum file duplicates on the"
-			 " same day exceeded for file %s\n", fpath);
-		exit (1);
-	}
-
-	if (mkdir (dp->path, 0755) == -1) {
-		fprintf (stderr, "failed to create directory %s: %m\n",
-			 dp->path);
-		exit (1);
-	}
-
-	return (dp);
+	return (NULL);
 }
 
 void
@@ -399,7 +500,7 @@ fallback_backup (const char *fpath, const struct stat *sb,
 
 	path = fpath + base_off;
 
-	dp = find_slot (fpath);
+	dp = find_slot (fpath, sb);
 
 	if (strlen (dp->path) + strlen (path) + 100 >= PATH_MAX) {
 		fprintf (stderr, "path exceeds PATH_MAX\n");
@@ -457,6 +558,7 @@ mk_backup (const char *fpath, const struct stat *sb,
 	struct stat dst_sb;
 
 	if (strncmp (fpath, backup_root, strlen (backup_root)) == 0) {
+
 		return (0);
 	}
 
