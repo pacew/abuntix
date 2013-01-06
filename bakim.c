@@ -36,7 +36,7 @@ int base_off;
 
 void usage (void);
 void *xcalloc (unsigned int a, unsigned int b);
-char *xstrdup (char *old);
+char *xstrdup (const char *old);
 int fsetflags (const char * name, unsigned long flags);
 int fgetflags (const char * name, unsigned long * flags);
 static int set_immutable (const char *fn);
@@ -45,7 +45,7 @@ static int delete_subtree (const char *path, const struct stat *sb, int tflag,
 			   struct FTW *ftwbuf);
 void delete_file_or_dir (char *path);
 void copy_file (const char *src_fn, char *dst_fn);
-char *base26 (int c, char *s);
+void base26 (int c, char *s);
 struct dir_data *find_dir (const char *path);
 int pave_path (const char *path, struct dir_data *dp);
 struct dir_data *find_slot (const char *fpath, const struct stat *sb,
@@ -83,7 +83,7 @@ xcalloc (unsigned int a, unsigned int b)
 }
 
 char *
-xstrdup (char *old)
+xstrdup (const char *old)
 {
 	char *new;
 
@@ -258,14 +258,12 @@ copy_file (const char *src_fn, char *dst_fn)
 	}
 }
 
-char *
+void
 base26 (int c, char *s)
 {
 	s[0] = (int) ((c % (26 * 26)) / 26) + 'a';
 	s[1] = (c % 26) + 'a';
 	s[2] = 0;
-
-	return (xstrdup (s));
 }
 
 struct dir_data *
@@ -291,7 +289,7 @@ pave_path (const char *path, struct dir_data *dp)
 	struct stat sb;
 	struct dir_data *dir;
 
-	s = strdup (path);
+	s = xstrdup (path);
 	p = s;
 
 	while (*p == '/')
@@ -335,8 +333,10 @@ pave_path (const char *path, struct dir_data *dp)
 				exit (1);
 			}
 		} else {
-			if (!S_ISDIR (sb.st_mode))
+			if (!S_ISDIR (sb.st_mode)) {
+				free (s);
 				return (-1);
+			}
 		}
 
 		*p = '/';
@@ -344,6 +344,8 @@ pave_path (const char *path, struct dir_data *dp)
 		while (*p == '/')
 			p++;
 	}
+
+	free (s);
 
 	return (0);
 }
@@ -997,7 +999,7 @@ main (int argc, char **argv)
 	}
 
 	for (idx = optind; idx < argc; idx++) {
-		s = strdup (argv[idx]);
+		s = xstrdup (argv[idx]);
 		l = strlen (s) - 1;
 
 		while (l > 1 && s[l] == '/')
