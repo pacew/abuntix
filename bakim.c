@@ -492,66 +492,6 @@ find_slot (const char *fpath, const struct stat *sb)
 }
 
 int
-fallback_backup (const char *fpath, const struct stat *sb,
-		 struct FTW *ftwbuf, char *newbr_name)
-{
-	char dst_name[PATH_MAX], *p, newbr_tar[PATH_MAX];
-	const char *path;
-	int idx;
-	struct dir_data *dp;
-	struct utimbuf times;
-
-	path = fpath + base_off;
-
-	dp = find_slot (fpath, sb);
-
-	if (strlen (dp->path) + strlen (path) + 100 >= PATH_MAX) {
-		fprintf (stderr, "path exceeds PATH_MAX\n");
-		exit (1);
-	}
-
-	sprintf (dst_name, "%s/%s", dp->path, path);
-
-	if (strlen (dp->path) + strlen (path)
-	    + strlen ("../") * ftwbuf->level + 100 >= PATH_MAX) {
-		fprintf (stderr, "path exceeds PATH_MAX\n");
-		exit (1);
-	}
-
-	p = newbr_tar;
-	for (idx = 0; idx < ftwbuf->level + 1; idx++) {
-		strcpy (p, "../");
-		p += 3;
-	}
-	sprintf (p, "%s/%s", dp->path + strlen (backup_root) + 1, path);
-
-	copy_file (fpath, dst_name);
-
-	times.actime = sb->st_atime;
-	times.modtime = sb->st_mtime;
-
-	if (utime (dst_name, &times) == -1) {
-		fprintf (stderr, "failed to set timestamps on %s: %m\n",
-			 dst_name);
-	}
-
-	if (lchown (dst_name, sb->st_uid, sb->st_gid) == -1) {
-		fprintf (stderr, "failed to chown %s: %m\n", dst_name);
-	}
-
-	set_immutable (dst_name);
-
-	delete_file_or_dir (newbr_name);
-
-	if (symlink (newbr_tar, newbr_name) == -1) {
-		fprintf (stderr, "failed to create symlink %s: %m\n",
-			 newbr_name);
-	}
-
-	return (0);
-}
-
-int
 check_same (const struct stat *a, const struct stat *b,
 	    const char *a_path, const char *b_path)
 {
@@ -629,6 +569,7 @@ backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 	struct stat dst_sb;
 	struct utimbuf times;
 	int idx;
+	struct dir_data *dp;
 
 	path = fpath + base_off;
 
@@ -641,9 +582,11 @@ backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 
 	if (lstat (dst_name, &dst_sb) == -1) {
 		if (errno == ENOTDIR) {
-			if (fallback_backup (fpath, sb, ftwbuf,
-					     newbr_name) != -1) {
-				fprintf (stderr, "fallback_backup failed\n");
+			dp = find_slot (fpath, sb);
+
+			if (backup_file (fpath, sb, ftwbuf, dp->path) == -1) {
+				fprintf (stderr, "backup failed for %s\n",
+					 fpath);
 				return (-1);
 			} else {
 				return (0);
@@ -657,9 +600,11 @@ backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 		if (check_same (sb, &dst_sb, NULL, NULL)) {
 			return (0);
 		} else {
-			if (fallback_backup (fpath, sb, ftwbuf,
-					     newbr_name) == -1) {
-				fprintf (stderr, "fallback_backup failed\n");
+			dp = find_slot (fpath, sb);
+
+			if (backup_file (fpath, sb, ftwbuf, dp->path)) {
+				fprintf (stderr, "backup failed for %s\n",
+					fpath);
 				return (-1);
 			} else {
 				return (0);
@@ -721,6 +666,7 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 	char dst_name[PATH_MAX], newbr_name[PATH_MAX], newbr_tar[PATH_MAX], *p;
 	struct stat dst_sb;
 	int idx;
+	struct dir_data *dp;
 
 	path = fpath + base_off;
 
@@ -733,9 +679,11 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 
 	if (lstat (dst_name, &dst_sb) == -1) {
 		if (errno == ENOTDIR) {
-			if (fallback_backup (fpath, sb, ftwbuf,
-					     newbr_name) != -1) {
-				fprintf (stderr, "fallback_backup failed\n");
+			dp = find_slot (fpath, sb);
+
+			if (backup_dir (fpath, sb, ftwbuf, dp->path) == -1) {
+				fprintf (stderr, "backup failed for %s\n",
+					fpath);
 				return (-1);
 			} else {
 				return (0);
@@ -750,9 +698,11 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 			touched_dir (dst_name, sb);
 			return (0);
 		} else {
-			if (fallback_backup (fpath, sb, ftwbuf,
-					     newbr_name) != -1) {
-				fprintf (stderr, "fallback_backup failed\n");
+			dp = find_slot (fpath, sb);
+
+			if (backup_dir (fpath, sb, ftwbuf, dp->path) == -1) {
+				fprintf (stderr, "backup failed for %s\n",
+					 fpath);
 				return (-1);
 			} else {
 				return (0);
@@ -827,6 +777,7 @@ backup_link (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 		lnk_tar[PATH_MAX], *p;
 	struct stat dst_sb;
 	int idx, r;
+	struct dir_data *dp;
 
 	path = fpath + base_off;
 
@@ -839,9 +790,11 @@ backup_link (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 
 	if (lstat (dst_name, &dst_sb) == -1) {
 		if (errno == ENOTDIR) {
-			if (fallback_backup (fpath, sb, ftwbuf,
-					     newbr_name) != -1) {
-				fprintf (stderr, "fallback_backup failed\n");
+			dp = find_slot (fpath, sb);
+
+			if (backup_link (fpath, sb, ftwbuf, dp->path) == -1) {
+				fprintf (stderr, "backup failed for %s\n",
+					fpath);
 				return (-1);
 			} else {
 				return (0);
@@ -855,9 +808,11 @@ backup_link (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
  		if (check_same (sb, &dst_sb, fpath, dst_name)) {
 			return (0);
 		} else {
-			if (fallback_backup (fpath, sb, ftwbuf,
-					     newbr_name) != -1) {
-				fprintf (stderr, "fallback_backup failed\n");
+			dp = find_slot (fpath, sb);
+
+			if (backup_link (fpath, sb, ftwbuf, dp->path) == -1) {
+				fprintf (stderr, "backup failed for %s\n",
+					fpath);
 				return (-1);
 			} else {
 				return (0);
