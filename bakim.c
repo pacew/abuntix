@@ -18,6 +18,8 @@
 
 #define MAX_DIRS_OPEN 100
 
+#define FILE_FOUND 0x00000001
+
 char *backup_root = BACKUP_ROOT;
 char *backup_directory, *newest, backup_branch[100];
 
@@ -31,6 +33,34 @@ struct dir_data {
 struct dir_data *first_dir, *first_collision_dir, *last_collision_dir;
 
 int base_off;
+
+void usage (void);
+void *xcalloc (unsigned int a, unsigned int b);
+char *xstrdup (char *old);
+int fsetflags (const char * name, unsigned long flags);
+int fgetflags (const char * name, unsigned long * flags);
+static int set_immutable (const char *fn);
+void touched_dir (char *path, const struct stat *sb);
+static int delete_subtree (const char *path, const struct stat *sb, int tflag,
+			   struct FTW *ftwbuf);
+void delete_file_or_dir (char *path);
+void copy_file (const char *src_fn, char *dst_fn);
+char *base26 (int c, char *s);
+struct dir_data *find_dir (const char *path);
+int pave_path (const char *path, struct dir_data *dp);
+struct dir_data *find_slot (const char *fpath, const struct stat *sb,
+			    int *flags);
+int check_same (const struct stat *a, const struct stat *b, const char *a_path,
+		const char *b_path);
+int backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
+		 char *backup_path);
+int backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
+		char *backup_path);
+int backup_link (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
+		 char *backup_path);
+static int mk_backup (const char *fpath, const struct stat *sb, int tflag,
+		      struct FTW *ftwbuf);
+void fix_dirs (void);
 
 void
 usage (void)
@@ -319,7 +349,7 @@ pave_path (const char *path, struct dir_data *dp)
 }
 
 struct dir_data *
-find_slot (const char *fpath, const struct stat *sb)
+find_slot (const char *fpath, const struct stat *sb, int *flags)
 {
 	int count;
 	struct dir_data *dp;
@@ -329,64 +359,28 @@ find_slot (const char *fpath, const struct stat *sb)
 
 	path = fpath + base_off;
 	count = 0;
+	*flags = 0;
 
 	for (dp = first_collision_dir; dp; dp = dp->next) {
 		if (strlen (dp->path) + strlen (path) + 100 >= PATH_MAX) {
 			fprintf (stderr, "path exceeds PATH_MAX\n");
 			exit (1);
 		}
-
 		sprintf (dst_name, "%s/%s", dp->path, path);
+
 		if (lstat (dst_name, &dst_sb) == -1) {
 			if (errno == ENOENT) {
 				if (pave_path (path, dp) != -1)
 					return (dp);
-			} else if (errno == ENOTDIR) {
-				continue;
-			} else {
+			} else if (errno != ENOTDIR) {
 				fprintf (stderr, "error with lstat on %s: %m\n",
  					 dst_name);
 				exit (1);
 			}
 		} else {
-			if (S_ISREG (sb->st_mode)) {
-				if (S_ISREG (dst_sb.st_mode)
-				    && sb->st_mtime == dst_sb.st_mtime
-				    && sb->st_size == dst_sb.st_size) {
-					return (NULL);
-				} else {
-					continue;
-				}
-			} else if (S_ISDIR (sb->st_mode)) {
-				if (S_ISDIR (dst_sb.st_mode)) {
-					return (NULL);
-				} else {
-					continue;
-				}
-			} else if (S_ISLNK (sb->st_mode)) {
-				/* if (!S_ISLNK (dst_sb.st_mode)) */
-				/* 	continue; */
-
-				/* r = readlink (fpath, lnk_tar, sb->st_size + 1); */
-
-				/* if (r < 0) { */
-				/* 	fprintf (stderr, "failed to read link" */
-				/* 		 " %s: %m\n"); */
-				/* 	exit (1); */
-				/* } */
-
-				/* if (r > sb->st_size) { */
-				/* 	fprintf (stderr, "symlink incrased in" */
-				/* 		 " size between lstat and" */
-				/* 		 " readlink\n"); */
-				/* 	exit (1); */
-				/* } */
-
-				/* lnk_tar[sb->st_size] = 0; */
-
-				/* r = readlink (dst_name, old_tar, sb->st_size + 1) */
-				fprintf (stderr, "links not supported yet\n");
-				exit (1);
+			if (check_same (sb, &dst_sb, fpath, dst_name)) {
+				*flags |= FILE_FOUND;
+				return (dp);
 			}
 		}
 
@@ -444,44 +438,9 @@ find_slot (const char *fpath, const struct stat *sb)
 				exit (1);
 			}
 		} else {
-			if (S_ISREG (sb->st_mode)) {
-				if (S_ISREG (dst_sb.st_mode)
-				    && sb->st_mtime == dst_sb.st_mtime
-				    && sb->st_size == dst_sb.st_size) {
-					return (NULL);
-				} else {
-					continue;
-				}
-			} else if (S_ISDIR (sb->st_mode)) {
-				if (S_ISDIR (dst_sb.st_mode)) {
-					return (NULL);
-				} else {
-					continue;
-				}
-			} else if (S_ISLNK (sb->st_mode)) {
-				/* if (!S_ISLNK (dst_sb.st_mode)) */
-				/* 	continue; */
-
-				/* r = readlink (fpath, lnk_tar, sb->st_size + 1); */
-
-				/* if (r < 0) { */
-				/* 	fprintf (stderr, "failed to read link" */
-				/* 		 " %s: %m\n"); */
-				/* 	exit (1); */
-				/* } */
-
-				/* if (r > sb->st_size) { */
-				/* 	fprintf (stderr, "symlink incrased in" */
-				/* 		 " size between lstat and" */
-				/* 		 " readlink\n"); */
-				/* 	exit (1); */
-				/* } */
-
-				/* lnk_tar[sb->st_size] = 0; */
-
-				/* r = readlink (dst_name, old_tar, sb->st_size + 1) */
-				fprintf (stderr, "links not supported yet\n");
-				exit (1);
+			if (check_same (sb, &dst_sb, fpath, dst_name)) {
+				*flags |= FILE_FOUND;
+				return (dp);
 			}
 		}
 	}
@@ -566,7 +525,7 @@ backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 	char dst_name[PATH_MAX], newbr_name[PATH_MAX], newbr_tar[PATH_MAX], *p;
 	struct stat dst_sb;
 	struct utimbuf times;
-	int idx;
+	int idx, flags;
 	struct dir_data *dp;
 
 	path = fpath + base_off;
@@ -580,7 +539,14 @@ backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 
 	if (lstat (dst_name, &dst_sb) == -1) {
 		if (errno == ENOTDIR) {
-			dp = find_slot (fpath, sb);
+			if ((dp = find_slot (fpath, sb, &flags)) == NULL) {
+				fprintf (stderr, "failed to find slot for %s\n",
+					 fpath);
+				return (-1);
+			}
+
+			if (flags & FILE_FOUND)
+				return (0);
 
 			if (backup_file (fpath, sb, ftwbuf, dp->path) == -1) {
 				fprintf (stderr, "backup failed for %s\n",
@@ -598,7 +564,14 @@ backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 		if (check_same (sb, &dst_sb, NULL, NULL)) {
 			return (0);
 		} else {
-			dp = find_slot (fpath, sb);
+			if ((dp = find_slot (fpath, sb, &flags)) == NULL) {
+				fprintf (stderr, "failed to find slot for %s\n",
+					 fpath);
+				return (-1);
+			}
+
+			if (flags & FILE_FOUND)
+				return (0);
 
 			if (backup_file (fpath, sb, ftwbuf, dp->path)) {
 				fprintf (stderr, "backup failed for %s\n",
@@ -663,7 +636,7 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 	const char *path;
 	char dst_name[PATH_MAX], newbr_name[PATH_MAX], newbr_tar[PATH_MAX], *p;
 	struct stat dst_sb;
-	int idx;
+	int idx, flags;
 	struct dir_data *dp;
 
 	path = fpath + base_off;
@@ -677,7 +650,14 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 
 	if (lstat (dst_name, &dst_sb) == -1) {
 		if (errno == ENOTDIR) {
-			dp = find_slot (fpath, sb);
+			if ((dp = find_slot (fpath, sb, &flags)) == NULL) {
+				fprintf (stderr, "failed to find slot for %s\n",
+					 fpath);
+				return (-1);
+			}
+
+			if (flags & FILE_FOUND)
+				return (0);
 
 			if (backup_dir (fpath, sb, ftwbuf, dp->path) == -1) {
 				fprintf (stderr, "backup failed for %s\n",
@@ -696,7 +676,14 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 			touched_dir (dst_name, sb);
 			return (0);
 		} else {
-			dp = find_slot (fpath, sb);
+			if ((dp = find_slot (fpath, sb, &flags)) == NULL) {
+				fprintf (stderr, "failed to find slot for %s\n",
+					 fpath);
+				return (-1);
+			}
+
+			if (flags & FILE_FOUND)
+				return (0);
 
 			if (backup_dir (fpath, sb, ftwbuf, dp->path) == -1) {
 				fprintf (stderr, "backup failed for %s\n",
@@ -774,7 +761,7 @@ backup_link (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 	char dst_name[PATH_MAX], newbr_name[PATH_MAX], newbr_tar[PATH_MAX], 
 		lnk_tar[PATH_MAX], *p;
 	struct stat dst_sb;
-	int idx, r;
+	int idx, r, flags;
 	struct dir_data *dp;
 
 	path = fpath + base_off;
@@ -788,7 +775,14 @@ backup_link (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 
 	if (lstat (dst_name, &dst_sb) == -1) {
 		if (errno == ENOTDIR) {
-			dp = find_slot (fpath, sb);
+			if ((dp = find_slot (fpath, sb, &flags)) == NULL) {
+				fprintf (stderr, "failed to find slot for %s\n",
+					 fpath);
+				return (-1);
+			}
+
+			if (flags & FILE_FOUND)
+				return (0);
 
 			if (backup_link (fpath, sb, ftwbuf, dp->path) == -1) {
 				fprintf (stderr, "backup failed for %s\n",
@@ -806,7 +800,14 @@ backup_link (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
  		if (check_same (sb, &dst_sb, fpath, dst_name)) {
 			return (0);
 		} else {
-			dp = find_slot (fpath, sb);
+			if ((dp = find_slot (fpath, sb, &flags)) == NULL) {
+				fprintf (stderr, "failed to find slot for %s\n",
+					 fpath);
+				return (-1);
+			}
+
+			if (flags & FILE_FOUND)
+				return (0);
 
 			if (backup_link (fpath, sb, ftwbuf, dp->path) == -1) {
 				fprintf (stderr, "backup failed for %s\n",
