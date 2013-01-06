@@ -1024,6 +1024,9 @@ main (int argc, char **argv)
 			}
 		}
 
+		first_collision_dir = 0;
+		last_collision_dir = 0;
+
 		free (s);
 
 		fix_dirs ();
