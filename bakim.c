@@ -178,7 +178,7 @@ delete_file_or_dir (char *path)
 		if (errno == ENOENT) {
 			return;
 		} else {
-			fprintf (stderr, "%d: error with lstat on %s: %m\n", __LINE__, path);
+			fprintf (stderr, "error with lstat on %s: %m\n", path);
 			exit (1);
 		}
 	}
@@ -276,8 +276,6 @@ pave_path (const char *path, struct dir_data *dp)
 
 		*p = 0;
 
-		printf ("%s\n", s);
-
 		if (strlen (dp->path) + strlen (s) + 100 >= PATH_MAX) {
 			fprintf (stderr, "path exceeds PATH_MAX\n");
 			exit (1);
@@ -287,8 +285,8 @@ pave_path (const char *path, struct dir_data *dp)
 
 		if (lstat (dir_name, &sb) == -1) {
 			if (errno != ENOENT) {
-				fprintf (stderr, "%d: error with lstat on %s: %m\n",
-					 __LINE__, 					 new);
+				fprintf (stderr, "error with lstat on %s: %m\n",
+					 new);
 				exit (1);
 			}
 
@@ -346,8 +344,8 @@ find_slot (const char *fpath, const struct stat *sb)
 			} else if (errno == ENOTDIR) {
 				continue;
 			} else {
-				fprintf (stderr, "%d: error with lstat on %s: %m\n",
-					 __LINE__, 					 dst_name);
+				fprintf (stderr, "error with lstat on %s: %m\n",
+ 					 dst_name);
 				exit (1);
 			}
 		} else {
@@ -412,8 +410,8 @@ find_slot (const char *fpath, const struct stat *sb)
 
 		if (lstat (dp->path, &dst_sb) == -1) {
 			if (errno != ENOENT) {
-				fprintf (stderr, "%d: error with lstat on %s: %m\n",
-					 __LINE__, 					 dp->path);
+				fprintf (stderr, "error with lstat on %s: %m\n",
+					 dp->path);
 				exit (1);
 			}
 
@@ -441,8 +439,8 @@ find_slot (const char *fpath, const struct stat *sb)
 			} else if (errno == ENOTDIR) {
 				continue;
 			} else {
-				fprintf (stderr, "%d: error with lstat on %s: %m\n",
-					 __LINE__, 					 dst_name);
+				fprintf (stderr, "error with lstat on %s: %m\n",
+ 					 dst_name);
 				exit (1);
 			}
 		} else {
@@ -592,8 +590,8 @@ backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 				return (0);
 			}
 		} else if (errno != ENOENT) {
-			fprintf (stderr, "%d: error with lstat on %s: %m\n",
-				 __LINE__, dst_name);
+			fprintf (stderr, "error with lstat on %s: %m\n",
+				 dst_name);
 			exit (1);
 		}
 	} else {
@@ -689,8 +687,8 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 				return (0);
 			}
 		} else if (errno != ENOENT) {
-			fprintf (stderr, "%d: error with lstat on %s: %m\n",
-				 __LINE__, dst_name);
+			fprintf (stderr, "error with lstat on %s: %m\n",
+				 dst_name);
 			exit (1);
 		}
 	} else {
@@ -800,8 +798,8 @@ backup_link (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 				return (0);
 			}
 		} else if (errno != ENOENT) {
-			fprintf (stderr, "%d: error with lstat on %s: %m\n",
-				 __LINE__, dst_name);
+			fprintf (stderr, "error with lstat on %s: %m\n",
+				 dst_name);
 			exit (1);
 		}
 	} else {
