@@ -19,7 +19,7 @@
 #define MAX_DIRS_OPEN 100
 
 char *backup_root = BACKUP_ROOT;
-char *backup_dir, *newest, backup_branch[100];
+char *backup_directory, *newest, backup_branch[100];
 
 struct dir_data {
 	struct dir_data *next;
@@ -36,6 +36,7 @@ void
 usage (void)
 {
 	printf ("usage: bakim [FILE]...\n");
+	exit (1);
 }
 
 void *
@@ -291,13 +292,13 @@ pave_path (const char *path, struct dir_data *dp)
 				exit (1);
 			}
 
-			if (strlen (backup_dir) + strlen (s)
+			if (strlen (backup_directory) + strlen (s)
 			    + 100 >= PATH_MAX) {
 				fprintf (stderr, "path exceeds PATH_MAX\n");
 				exit (1);
 			}
 
-			sprintf (orig_dir, "%s/%s", backup_dir, s);
+			sprintf (orig_dir, "%s/%s", backup_directory, s);
 			dir = find_dir (orig_dir);
 
 			if (mkdir (dir_name, dir->mode) == -1) {
@@ -339,14 +340,16 @@ find_slot (const char *fpath, const struct stat *sb)
 
 		sprintf (dst_name, "%s/%s", dp->path, path);
 		if (lstat (dst_name, &dst_sb) == -1) {
-			if (errno != ENOENT) {
+			if (errno == ENOENT) {
+				if (pave_path (path, dp) != -1)
+					return (dp);
+			} else if (errno == ENOTDIR) {
+				continue;
+			} else {
 				fprintf (stderr, "%d: error with lstat on %s: %m\n",
 					 __LINE__, 					 dst_name);
 				exit (1);
 			}
-
-			if (pave_path (path, dp) != -1)
-				return (dp);
 		} else {
 			if (S_ISREG (sb->st_mode)) {
 				if (S_ISREG (dst_sb.st_mode)
@@ -392,12 +395,12 @@ find_slot (const char *fpath, const struct stat *sb)
 		count++;
 	}
 
-	while (count <= 675) {
+	for (; count <= 675; count++) {
 		dp = xcalloc (1, sizeof *dp);
-		dp->path = xcalloc (1, strlen (backup_dir) + 10);
+		dp->path = xcalloc (1, strlen (backup_directory) + 10);
 
 		base26 (count, suffix);
-		sprintf (dp->path, "%s-%s", backup_dir, suffix);
+		sprintf (dp->path, "%s-%s", backup_directory, suffix);
 
 		if (!first_collision_dir)
 			first_collision_dir = dp;
@@ -432,14 +435,16 @@ find_slot (const char *fpath, const struct stat *sb)
 
 		sprintf (dst_name, "%s/%s", dp->path, path);
 		if (lstat (dst_name, &dst_sb) == -1) {
-			if (errno != ENOENT) {
+			if (errno == ENOENT) {
+				if (pave_path (path, dp) != -1)
+					return (dp);
+			} else if (errno == ENOTDIR) {
+				continue;
+			} else {
 				fprintf (stderr, "%d: error with lstat on %s: %m\n",
 					 __LINE__, 					 dst_name);
 				exit (1);
 			}
-
-			if (pave_path (path, dp) != -1)
-				return (dp);
 		} else {
 			if (S_ISREG (sb->st_mode)) {
 				if (S_ISREG (dst_sb.st_mode)
@@ -481,16 +486,14 @@ find_slot (const char *fpath, const struct stat *sb)
 				exit (1);
 			}
 		}
-
-		count++;
 	}
 
 	return (NULL);
 }
 
-void
+int
 fallback_backup (const char *fpath, const struct stat *sb,
-		 int tflag, struct FTW *ftwbuf, char *newbr_name)
+		 struct FTW *ftwbuf, char *newbr_name)
 {
 	char dst_name[PATH_MAX], *p, newbr_tar[PATH_MAX];
 	const char *path;
@@ -544,6 +547,8 @@ fallback_backup (const char *fpath, const struct stat *sb,
 		fprintf (stderr, "failed to create symlink %s: %m\n",
 			 newbr_name);
 	}
+
+	return (0);
 }
 
 int
@@ -562,12 +567,17 @@ check_same (const struct stat *a, const struct stat *b,
 			return (1);
 		}
 	} else if (S_ISDIR (a->st_mode) && S_ISDIR (b->st_mode)) {
-		if (a->st_mtime == b->st_mtime
-		    && (a->st_mode & mask) == (b->st_mode & mask)
+		if ((a->st_mode & mask) == (b->st_mode & mask)
 		    && a->st_uid == b->st_uid && a->st_gid == b->st_gid) {
 			return (1);
 		}
 	} else if (S_ISLNK (a->st_mode) && S_ISLNK (b->st_mode)) {
+		if (!a_path || !b_path) {
+			fprintf (stderr, "bad call to check_same,"
+				 " paths required for links\n");
+			exit (1);
+		}
+
 		if (a->st_uid != b->st_uid || a->st_gid != b->st_gid)
 			return (0);
 
@@ -610,41 +620,51 @@ check_same (const struct stat *a, const struct stat *b,
 	return (0);
 }
 
-static int
-mk_backup (const char *fpath, const struct stat *sb,
-		int tflag, struct FTW *ftwbuf)
+int
+backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
+	     char *backup_path)
 {
-	char dst_name[PATH_MAX], lnk_tar[PATH_MAX], old_tar[PATH_MAX],
-		newbr_name[PATH_MAX], newbr_tar[PATH_MAX], *p;
 	const char *path;
-	struct utimbuf times;
-	int r, exists, idx;
+	char dst_name[PATH_MAX], newbr_name[PATH_MAX], newbr_tar[PATH_MAX], *p;
 	struct stat dst_sb;
-
-	if (strncmp (fpath, backup_root, strlen (backup_root)) == 0) {
-
-		return (0);
-	}
+	struct utimbuf times;
+	int idx;
 
 	path = fpath + base_off;
 
-	if (strlen (path) + strlen (backup_dir) + 100 >= PATH_MAX) {
+	if (strlen (path) + strlen (backup_path) + 100 >= PATH_MAX) {
 		fprintf (stderr, "path exceeds PATH_MAX\n");
 		exit (1);
 	}
 
-	sprintf (dst_name, "%s/%s", backup_dir, path);
+	sprintf (dst_name, "%s/%s", backup_path, path);
 
 	if (lstat (dst_name, &dst_sb) == -1) {
-		if (errno == ENOENT) {
-			exists = 0;
-		} else {
+		if (errno == ENOTDIR) {
+			if (fallback_backup (fpath, sb, ftwbuf,
+					     newbr_name) != -1) {
+				fprintf (stderr, "fallback_backup failed\n");
+				return (-1);
+			} else {
+				return (0);
+			}
+		} else if (errno != ENOENT) {
 			fprintf (stderr, "%d: error with lstat on %s: %m\n",
-				 __LINE__, 				 dst_name);
+				 __LINE__, dst_name);
 			exit (1);
 		}
 	} else {
-		exists = 1;
+		if (check_same (sb, &dst_sb, NULL, NULL)) {
+			return (0);
+		} else {
+			if (fallback_backup (fpath, sb, ftwbuf,
+					     newbr_name) == -1) {
+				fprintf (stderr, "fallback_backup failed\n");
+				return (-1);
+			} else {
+				return (0);
+			}
+		}
 	}
 
 	if (strlen (newest) + strlen (path) + 100 >= PATH_MAX) {
@@ -653,7 +673,7 @@ mk_backup (const char *fpath, const struct stat *sb,
 	}
 	sprintf (newbr_name, "%s/%s", newest, path);
 
-	if (strlen (backup_branch) + strlen (path)
+	if (strlen (backup_path) + strlen (path)
 	    + strlen ("../") * ftwbuf->level + 100 >= PATH_MAX) {
 		fprintf (stderr, "path exceeds PATH_MAX\n");
 		exit (1);
@@ -664,161 +684,267 @@ mk_backup (const char *fpath, const struct stat *sb,
 		strcpy (p, "../");
 		p += 3;
 	}
-	sprintf (p, "%s/%s", backup_branch, path);
+	sprintf (p, "%s/%s", backup_path, path);
+
+	copy_file (fpath, dst_name);
+
+	times.actime = sb->st_atime;
+	times.modtime = sb->st_mtime;
+
+	if (utime (dst_name, &times) == -1) {
+		fprintf (stderr, "failed to set timestamps on %s: %m\n",
+			 dst_name);
+	}
+
+	if (lchown (dst_name, sb->st_uid, sb->st_gid) == -1) {
+		fprintf (stderr, "failed to chown %s: %m\n", dst_name);
+	}
+
+	set_immutable (dst_name);
+
+	delete_file_or_dir (newbr_name);
+
+	if (symlink (newbr_tar, newbr_name) == -1) {
+		fprintf (stderr, "failed to create symlink %s: %m\n",
+			 newbr_name);
+		return (-1);
+	}
+
+	return (0);
+}
+
+int
+backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
+	    char *backup_path)
+{
+	const char *path;
+	char dst_name[PATH_MAX], newbr_name[PATH_MAX], newbr_tar[PATH_MAX], *p;
+	struct stat dst_sb;
+	int idx;
+
+	path = fpath + base_off;
+
+	if (strlen (path) + strlen (backup_path) + 100 >= PATH_MAX) {
+		fprintf (stderr, "path exceeds PATH_MAX\n");
+		exit (1);
+	}
+
+	sprintf (dst_name, "%s/%s", backup_path, path);
+
+	if (lstat (dst_name, &dst_sb) == -1) {
+		if (errno == ENOTDIR) {
+			if (fallback_backup (fpath, sb, ftwbuf,
+					     newbr_name) != -1) {
+				fprintf (stderr, "fallback_backup failed\n");
+				return (-1);
+			} else {
+				return (0);
+			}
+		} else if (errno != ENOENT) {
+			fprintf (stderr, "%d: error with lstat on %s: %m\n",
+				 __LINE__, dst_name);
+			exit (1);
+		}
+	} else {
+		if (check_same (sb, &dst_sb, NULL, NULL)) {
+			touched_dir (dst_name, sb);
+			return (0);
+		} else {
+			if (fallback_backup (fpath, sb, ftwbuf,
+					     newbr_name) != -1) {
+				fprintf (stderr, "fallback_backup failed\n");
+				return (-1);
+			} else {
+				return (0);
+			}
+		}
+	}
+
+	if (strlen (newest) + strlen (path) + 100 >= PATH_MAX) {
+		fprintf (stderr, "path exceeds PATH_MAX\n");
+		exit (1);
+	}
+	sprintf (newbr_name, "%s/%s", newest, path);
+
+	if (strlen (backup_path) + strlen (path)
+	    + strlen ("../") * ftwbuf->level + 100 >= PATH_MAX) {
+		fprintf (stderr, "path exceeds PATH_MAX\n");
+		exit (1);
+	}
+
+	p = newbr_tar;
+	for (idx = 0; idx < ftwbuf->level + 1; idx++) {
+		strcpy (p, "../");
+		p += 3;
+	}
+	sprintf (p, "%s/%s", backup_path, path);
+
+	if (mkdir (dst_name, sb->st_mode) == -1) {
+		fprintf (stderr, "failed to create directory %s: %m\n",
+			 dst_name);
+		return (-1);
+	}
+
+	if (lchown (dst_name, sb->st_uid, sb->st_gid) == -1) {
+		fprintf (stderr, "failed to chown %s: %m\n", dst_name);
+	}
+
+	if (lstat (dst_name, &dst_sb) == -1) {
+		fprintf (stderr, "error with lstat on %s: %m\n", dst_name);
+		return (-1);
+	}
+
+	touched_dir (dst_name, sb);
+
+	delete_file_or_dir (newbr_name);
+
+	if (mkdir (newbr_name, sb->st_mode) == -1) {
+		fprintf (stderr, "failed to create directory %s: %m\n",
+			 newbr_name);
+		return (-1);
+	}
+
+	if (lchown (newbr_name, sb->st_uid, sb->st_gid) == -1) {
+		fprintf (stderr, "failed to chown %s: %m\n", newbr_name);
+	}
+
+	if (lstat (newbr_name, &dst_sb) == -1) {
+		fprintf (stderr, "error with lstat on %s: %m\n", newbr_name);
+		return (-1);
+	}
+
+	touched_dir (newbr_name, sb);
+
+	return (0);
+}
+
+int
+backup_link (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
+	     char *backup_path)
+{
+	const char *path;
+	char dst_name[PATH_MAX], newbr_name[PATH_MAX], newbr_tar[PATH_MAX], 
+		lnk_tar[PATH_MAX], *p;
+	struct stat dst_sb;
+	int idx, r;
+
+	path = fpath + base_off;
+
+	if (strlen (path) + strlen (backup_path) + 100 >= PATH_MAX) {
+		fprintf (stderr, "path exceeds PATH_MAX\n");
+		exit (1);
+	}
+
+	sprintf (dst_name, "%s/%s", backup_path, path);
+
+	if (lstat (dst_name, &dst_sb) == -1) {
+		if (errno == ENOTDIR) {
+			if (fallback_backup (fpath, sb, ftwbuf,
+					     newbr_name) != -1) {
+				fprintf (stderr, "fallback_backup failed\n");
+				return (-1);
+			} else {
+				return (0);
+			}
+		} else if (errno != ENOENT) {
+			fprintf (stderr, "%d: error with lstat on %s: %m\n",
+				 __LINE__, dst_name);
+			exit (1);
+		}
+	} else {
+ 		if (check_same (sb, &dst_sb, fpath, dst_name)) {
+			return (0);
+		} else {
+			if (fallback_backup (fpath, sb, ftwbuf,
+					     newbr_name) != -1) {
+				fprintf (stderr, "fallback_backup failed\n");
+				return (-1);
+			} else {
+				return (0);
+			}
+		}
+	}
+
+	if (strlen (newest) + strlen (path) + 100 >= PATH_MAX) {
+		fprintf (stderr, "path exceeds PATH_MAX\n");
+		exit (1);
+	}
+	sprintf (newbr_name, "%s/%s", newest, path);
+
+	if (strlen (backup_path) + strlen (path)
+	    + strlen ("../") * ftwbuf->level + 100 >= PATH_MAX) {
+		fprintf (stderr, "path exceeds PATH_MAX\n");
+		exit (1);
+	}
+
+	p = newbr_tar;
+	for (idx = 0; idx < ftwbuf->level + 1; idx++) {
+		strcpy (p, "../");
+		p += 3;
+	}
+	sprintf (p, "%s/%s", backup_path, path);
+
+	r = readlink (fpath, lnk_tar, sb->st_size + 1);
+
+	if (r < 0) {
+		fprintf (stderr, "readlink failed on %s: %m\n", fpath);
+		return (-1);
+	}
+
+	if (r > sb->st_size) {
+		fprintf (stderr,
+			 "symlink increased in size, failed to back up\n");
+		return (-1);
+	}
+
+	lnk_tar[sb->st_size] = 0;
+
+	if (symlink (lnk_tar, dst_name) == -1) {
+		fprintf (stderr, "failed to create symlink %s: %m\n", dst_name);
+		return (-1);
+	}
+
+	if (lchown (dst_name, sb->st_uid, sb->st_gid) == -1) {
+		fprintf (stderr, "failed to chown %s: %m\n", dst_name);
+	}
+
+	delete_file_or_dir (newbr_name);
+
+	if (symlink (newbr_tar, newbr_name) == -1) {
+		fprintf (stderr, "failed to create symlink %s: %m\n",
+			 newbr_name);
+		return (-1);
+	}
+
+	return (0);
+}
+
+static int
+mk_backup (const char *fpath, const struct stat *sb,
+		int tflag, struct FTW *ftwbuf)
+{
+	if (strncmp (fpath, backup_root, strlen (backup_root)) == 0) {
+
+		return (0);
+	}
 
 	switch (tflag) {
 	case FTW_F:
-		if (exists) {
-			if (S_ISREG (sb->st_mode)
-			    && sb->st_mtime == dst_sb.st_mtime
-			    && sb->st_size == dst_sb.st_size) {
-				return (0);
-			} else {
-				fallback_backup (fpath, sb, tflag, ftwbuf,
-						 newbr_name);
-				return (0);
-			}
-		}
-
-		copy_file (fpath, dst_name);
-
-		times.actime = sb->st_atime;
-		times.modtime = sb->st_mtime;
-
-		if (utime (dst_name, &times) == -1) {
-			fprintf (stderr, "failed to set timestamps on %s: %m\n",
-				 dst_name);
-		}
-
-		if (lchown (dst_name, sb->st_uid, sb->st_gid) == -1) {
-			fprintf (stderr, "failed to chown %s: %m\n", dst_name);
-		}
-
-		set_immutable (dst_name);
-
-		delete_file_or_dir (newbr_name);
-
-		if (symlink (newbr_tar, newbr_name) == -1) {
-			fprintf (stderr, "failed to create symlink %s: %m\n",
-				 newbr_name);
-			return (0);
-		}
+		if (backup_file (fpath, sb, ftwbuf, backup_directory) == -1)
+			fprintf (stderr, "failed to back up %s\n", fpath);
 
 		break;
 	case FTW_D:
-		if (exists) {
-			if (S_ISDIR (sb->st_mode)) {
-				touched_dir (dst_name, sb);
-				return (0);
-			} else {
-				fprintf (stderr, "failed to create %s, %s"
-					 " exists with same name\n", dst_name,
-					 S_ISREG (sb->st_mode)
-					 ? "file" : "symlink");
-				return (0);
-			}
-		}
-
-		if (mkdir (dst_name, sb->st_mode) == -1) {
-			fprintf (stderr, "failed to create directory %s: %m\n",
-				 dst_name);
-			exit (1);
-		}
-
-		if (lchown (dst_name, sb->st_uid, sb->st_gid) == -1) {
-			fprintf (stderr, "failed to chown %s: %m\n", dst_name);
-		}
-
-		if (lstat (dst_name, &dst_sb) == -1) {
-			fprintf (stderr, "%d: error with lstat on %s: %m\n",
-				 __LINE__, 				 dst_name);
-			exit (1);
-		}
-
-		touched_dir (dst_name, sb);
-
-		delete_file_or_dir (newbr_name);
-
-		if (mkdir (newbr_name, sb->st_mode) == -1) {
-			fprintf (stderr, "failed to create directory %s: %m\n",
-				 newbr_name);
-			return (0);
-		}
-
-		if (lchown (newbr_name, sb->st_uid, sb->st_gid) == -1) {
-			fprintf (stderr, "failed to chown %s: %m\n",
-				 newbr_name);
-		}
-
-		if (lstat (newbr_name, &dst_sb) == -1) {
-			fprintf (stderr, "%d: error with lstat on %s: %m\n",
-				 __LINE__, 				 newbr_name);
-			exit (1);
-		}
-
-		touched_dir (newbr_name, sb);
-
+		if (backup_dir (fpath, sb, ftwbuf, backup_directory) == -1)
+			fprintf (stderr, "failed to back up %s\n", fpath);
 		break;
 	case FTW_SL:
-		r = readlink (fpath, lnk_tar, sb->st_size + 1);
-
-		if (r < 0) {
-			fprintf (stderr, "failed to read link %s: %m\n",
-				 dst_name);
-			exit (1);
-		}
-
-		if (r > sb->st_size) {
-			fprintf (stderr, "symlink increased in size "
-				 "between lstat and readlink\n");
-			exit (1);
-		}
-
-		lnk_tar[sb->st_size] = 0;
-
-		if (exists) {
-			if (S_ISLNK (sb->st_mode)) {
-				r = readlink (dst_name, old_tar,
-					      sb->st_size + 1);
-
-				if (r < 0) {
-					fprintf (stderr, "failed to read"
-						 " link %s: %m\n", dst_name);
-					return (0);
-				}
-
-				if (strcmp (lnk_tar, old_tar) == 0) {
-					return (0);
-				}
-			} else {
-				fprintf (stderr, "failed to create symlink %s,"
-					 " something already exists with"
-					 " same name\n", dst_name);
-				return (0);
-			}
-		}
-
-		if (symlink (lnk_tar, dst_name) == -1) {
-			fprintf (stderr, "failed to create symlink %s: %m\n",
-				 dst_name);
-			exit (1);
-		}
-
-		if (lchown (dst_name, sb->st_uid, sb->st_gid) == -1) {
-			fprintf (stderr, "failed to chown %s: %m\n", dst_name);
-		}
-
-		delete_file_or_dir (newbr_name);
-
-		if (symlink (newbr_tar, newbr_name) == -1) {
-			fprintf (stderr, "failed to create symlink %s: %m\n",
-				 newbr_name);
-			return (0);
-		}
+		if (backup_link (fpath, sb, ftwbuf, backup_directory) == -1)
+			fprintf (stderr, "failed to back up %s\n", fpath);
 
 		break;
 	default:
-		return (0);
+		break;
 	}
 
 	return (0);
@@ -866,86 +992,87 @@ main (int argc, char **argv)
 
 	flags = FTW_PHYS;
 
-	if (optind < argc) {
-		l = strlen (backup_root) + strlen ("newest") + 10;
-		if ((newest = calloc (1, l)) == NULL) {
-			fprintf (stderr, "failed to allocate newest\n");
-			return (1);
-		}
-
-		sprintf (newest, "%s/%s", backup_root, "newest");
-
-		if (mkdir (newest, 0755) == -1) {
-			if (errno != EEXIST) {
-				fprintf (stderr,
-					 "failed to create directory %s: %m\n",
-					 newest);
-					return (1);
-			}
-		}
-
-		time (&rawtime);
-		timeinfo = localtime (&rawtime);
-		sprintf (backup_branch, "%04d-%02d-%02d",
-			 timeinfo->tm_year + 1900, timeinfo->tm_mon + 1,
-			 timeinfo->tm_mday);
-
-		l = strlen (backup_root) + strlen (backup_branch) + 10;
-		if ((backup_dir = calloc (1, l)) == NULL) {
-			fprintf (stderr, "failed to allocate backup_dir\n");
-			return (1);
-		}
-
-		sprintf (backup_dir, "%s/%s", backup_root, backup_branch);
-
-		if (mkdir (backup_dir, 0755) == -1) {
-			if (errno != EEXIST) {
-				fprintf (stderr,
-					 "failed to create directory %s: %m\n",
-					 backup_dir);
-				return (1);
-			}
-		}
-
-		if (lchown (backup_dir, 0, 0) == -1) {
-			fprintf (stderr, "failed to chown %s: %m\n",
-				 backup_dir);
-		}
-
-		for (idx = optind; idx < argc; idx++) {
-			s = strdup (argv[idx]);
-			l = strlen (s) - 1;
-
-			while (l > 1 && s[l] == '/')
-				s[l--] = 0;
-
-			if ((p = strrchr (s, '/')) != NULL && strlen (p) > 1) {
-				base_off = p - s + 1;
-			} else {
-				base_off = 0;
-			}
-
-			if (nftw (argv[idx], mk_backup,
-				  MAX_DIRS_OPEN, flags) == -1) {
-				fprintf (stderr, "nftw failed\n");
-				return (-1);
-			}
-
-			if (first_collision_dir) {
-				for (dp = first_collision_dir; dp; dp = ndp) {
-					ndp = dp->next;
-
-					free (dp->path);
-					free (dp);
-				}
-			}
-
-			free (s);
-
-			fix_dirs ();
-		}
-	} else {
+	if (optind >= argc) {
 		usage ();
+	}
+
+	l = strlen (backup_root) + strlen ("newest") + 10;
+	if ((newest = calloc (1, l)) == NULL) {
+		fprintf (stderr, "failed to allocate newest\n");
+		return (1);
+	}
+
+	sprintf (newest, "%s/%s", backup_root, "newest");
+
+	if (mkdir (newest, 0755) == -1) {
+		if (errno != EEXIST) {
+			fprintf (stderr,
+				 "failed to create directory %s: %m\n",
+				 newest);
+			return (1);
+		}
+	}
+
+	time (&rawtime);
+	timeinfo = localtime (&rawtime);
+	sprintf (backup_branch, "%04d-%02d-%02d",
+		 timeinfo->tm_year + 1900, timeinfo->tm_mon + 1,
+		 timeinfo->tm_mday);
+
+	l = strlen (backup_root) + strlen (backup_branch) + 10;
+	if ((backup_directory = calloc (1, l)) == NULL) {
+		fprintf (stderr,
+			 "failed to allocate backup_directory\n");
+		return (1);
+	}
+
+	sprintf (backup_directory, "%s/%s", backup_root, backup_branch);
+
+	if (mkdir (backup_directory, 0755) == -1) {
+		if (errno != EEXIST) {
+			fprintf (stderr,
+				 "failed to create directory %s: %m\n",
+				 backup_directory);
+			return (1);
+		}
+	}
+
+	if (lchown (backup_directory, 0, 0) == -1) {
+		fprintf (stderr, "failed to chown %s: %m\n",
+			 backup_directory);
+	}
+
+	for (idx = optind; idx < argc; idx++) {
+		s = strdup (argv[idx]);
+		l = strlen (s) - 1;
+
+		while (l > 1 && s[l] == '/')
+			s[l--] = 0;
+
+		if ((p = strrchr (s, '/')) != NULL && strlen (p) > 1) {
+			base_off = p - s + 1;
+		} else {
+			base_off = 0;
+		}
+
+		if (nftw (argv[idx], mk_backup,
+			  MAX_DIRS_OPEN, flags) == -1) {
+			fprintf (stderr, "nftw failed\n");
+			return (-1);
+		}
+
+		if (first_collision_dir) {
+			for (dp = first_collision_dir; dp; dp = ndp) {
+				ndp = dp->next;
+
+				free (dp->path);
+				free (dp);
+			}
+		}
+
+		free (s);
+
+		fix_dirs ();
 	}
 
 	return (0);
