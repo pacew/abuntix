@@ -6,10 +6,10 @@ abuntix-setup
 TMP*
 google-chrome*deb
 sources.list
-bakim
-/Makefile
+bakim/Makefile
+bakim/src/Makefile
+bakim/src/bakim
 config.log
 config.status
 src/.deps/
-src/Makefile
 bakim*.tar.gz
