@@ -7,3 +7,9 @@ TMP*
 google-chrome*deb
 sources.list
 bakim
+/Makefile
+config.log
+config.status
+src/.deps/
+src/Makefile
+bakim*.tar.gz

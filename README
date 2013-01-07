@@ -1,0 +1,5 @@
+abuntix is an ubuntu derivative, to be installed over a fresh install
+of Ubuntu Desktop 12.10.
+
+bakim is a script for backing up files which are expected to never
+change (music files, videos, disk images, etc.)
