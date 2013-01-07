@@ -21,11 +21,11 @@
 #define FILE_FOUND 0x00000001
 
 char *backup_root = BACKUP_ROOT;
-char *backup_directory, *newest, backup_branch[100];
+char *backup_directory, *newest, *backup_branch;
 
 struct dir_data {
 	struct dir_data *next;
-	char *path;
+	char *path, *rpath;
 	time_t atime, mtime;
 	int mode;
 };
@@ -35,12 +35,13 @@ struct dir_data *first_dir, *first_collision_dir, *last_collision_dir;
 int base_off;
 
 void usage (void);
+void valgrind_cleanup (void);
 void *xcalloc (unsigned int a, unsigned int b);
 char *xstrdup (const char *old);
-int fsetflags (const char * name, unsigned long flags);
-int fgetflags (const char * name, unsigned long * flags);
+int fsetflags (const char *name, unsigned long flags);
+int fgetflags (const char *name, unsigned long *flags);
 static int set_immutable (const char *fn);
-void touched_dir (char *path, const struct stat *sb);
+void touched_dir (const char *rpath, const char *path, const struct stat *sb);
 static int delete_subtree (const char *path, const struct stat *sb, int tflag,
 			   struct FTW *ftwbuf);
 void delete_file_or_dir (char *path);
@@ -67,6 +68,14 @@ usage (void)
 {
 	printf ("usage: bakim [FILE]...\n");
 	exit (1);
+}
+
+void
+valgrind_cleanup (void)
+{
+	free (newest);
+	free (backup_directory);
+	free (backup_branch);
 }
 
 void *
@@ -96,53 +105,56 @@ xstrdup (const char *old)
 }
 
 int
-fsetflags (const char * name, unsigned long flags)
+fsetflags (const char *name, unsigned long flags)
 {
-	int fd, r, f, save_errno = 0;
+	int fd, r, f, save_errno;
 	struct stat buf;
 
-	if (!lstat(name, &buf) &&
-	    !S_ISREG(buf.st_mode) && !S_ISDIR(buf.st_mode)) {
-		goto notsupp;
+	save_errno = 0;
+
+	if (!lstat (name, &buf) && !S_ISREG (buf.st_mode)
+	    && !S_ISDIR (buf.st_mode)) {
+		return (-1);
 	}
 
 	fd = open (name, O_RDONLY);
 	if (fd == -1)
-		return -1;
+		return (-1);
+
 	f = (int) flags;
 	r = ioctl (fd, _IOW('f', 2, long), &f);
+
 	if (r == -1)
 		save_errno = errno;
+
 	close (fd);
+
 	if (save_errno)
 		errno = save_errno;
-	return r;
 
-notsupp:
-	return -1;
+	return (r);
 }
 
 int
-fgetflags (const char * name, unsigned long * flags)
+fgetflags (const char *name, unsigned long *flags)
 {
 	struct stat buf;
-
 	int fd, r, f;
 
-	if (!lstat(name, &buf) &&
-	    !S_ISREG(buf.st_mode) && !S_ISDIR(buf.st_mode)) {
-		goto notsupp;
+	if (!lstat (name, &buf) && !S_ISREG (buf.st_mode)
+	    && !S_ISDIR (buf.st_mode)) {
+		return (-1);
 	}
+
 	fd = open (name, O_RDONLY);
 	if (fd == -1)
-		return -1;
+		return (-1);
+
 	r = ioctl (fd, _IOR ('f', 1, long), &f);
 	*flags = f;
 	close (fd);
-	return r;
 
-notsupp:
-	return -1;
+	return (r);
 }
 
 static int
@@ -152,27 +164,28 @@ set_immutable (const char *fn)
 
 	if (fgetflags(fn, &flags) == -1) {
 		printf ("failed to get flags for %s\n", fn);
-		return -1;
+		return (-1);
 	}
 
 	flags |= EXT2_IMMUTABLE_FL;
 
 	if (fsetflags(fn, flags) == -1) {
 		printf ("failed to set flags for %s\n", fn);
-		return -1;
+		return (-1);
 	}
 
 	return (0);
 }
 
 void
-touched_dir (char *path, const struct stat *sb)
+touched_dir (const char *rpath, const char *path, const struct stat *sb)
 {
 	struct dir_data *dp;
 
 	dp = xcalloc (1, sizeof *dp);
 
 	dp->path = xstrdup (path);
+	dp->rpath = xstrdup (rpath);
 	dp->atime = sb->st_atime;
 	dp->mtime = sb->st_mtime;
 	dp->mode = sb->st_mode;
@@ -213,7 +226,6 @@ delete_file_or_dir (char *path)
 		}
 	}
 
-
 	flags = FTW_PHYS | FTW_DEPTH;
 
 	if (nftw (path, delete_subtree, MAX_DIRS_OPEN, flags) == -1) {
@@ -243,7 +255,7 @@ copy_file (const char *src_fn, char *dst_fn)
 	while ((n_read = fread (buf, 1, sizeof buf, src)) > 0) {
 		if (fwrite (buf, 1, n_read, dst) != n_read) {
 			fprintf (stderr, "error copying file:"
-				 " potentially out of space\n");
+				 " possibly out of space\n");
 			exit (1);
 		}
 	}
@@ -272,7 +284,7 @@ find_dir (const char *path)
 	struct dir_data *dp;
 
 	for (dp = first_dir; dp; dp = dp->next) {
-		if (strcmp (path, dp->path) == 0) {
+		if (strcmp (path, dp->rpath) == 0) {
 			return (dp);
 		}
 	}
@@ -285,15 +297,17 @@ find_dir (const char *path)
 int
 pave_path (const char *path, struct dir_data *dp)
 {
-	char *s, *p, new[PATH_MAX], dir_name[PATH_MAX], orig_dir[PATH_MAX];
+	char *s, *p, *path2, new[PATH_MAX], dir_name[PATH_MAX];
 	struct stat sb;
 	struct dir_data *dir;
 
-	s = xstrdup (path);
-	p = s;
+	path2 = xstrdup (path);
+	s = path2;
 
-	while (*p == '/')
-		p++;
+	while (*s == '/')
+		s++;
+
+	p = s;
 
 	while (1) {
 		while (*p && *p != '/')
@@ -324,8 +338,7 @@ pave_path (const char *path, struct dir_data *dp)
 				exit (1);
 			}
 
-			sprintf (orig_dir, "%s/%s", backup_directory, s);
-			dir = find_dir (orig_dir);
+			dir = find_dir (s);
 
 			if (mkdir (dir_name, dir->mode) == -1) {
 				fprintf (stderr, "failed to create"
@@ -334,7 +347,7 @@ pave_path (const char *path, struct dir_data *dp)
 			}
 		} else {
 			if (!S_ISDIR (sb.st_mode)) {
-				free (s);
+				free (path2);
 				return (-1);
 			}
 		}
@@ -345,7 +358,7 @@ pave_path (const char *path, struct dir_data *dp)
 			p++;
 	}
 
-	free (s);
+	free (path2);
 
 	return (0);
 }
@@ -412,15 +425,19 @@ find_slot (const char *fpath, const struct stat *sb, int *flags)
 			}
 
 			if (mkdir (dp->path, 0755) == -1) {
-				fprintf (stderr, "failed to create directory %s: %m\n",
-					 dp->path);
+				fprintf (stderr, "failed to create directory"
+					 " %s: %m\n", dp->path);
 				exit (1);
 			}
 
-			if (pave_path (path, dp) != -1)
+			if (pave_path (path, dp) == -1) {
+				fprintf (stderr, "new slot %s failed, odd."
+					 " failing search\n", dp->path);
+				return (NULL);
+			} else {
 				return (dp);
+			}
 		}
-
 
 		if (strlen (dp->path) + strlen (path) + 100 >= PATH_MAX) {
 			fprintf (stderr, "path exceeds PATH_MAX\n");
@@ -532,7 +549,7 @@ backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 
 	path = fpath + base_off;
 
-	if (strlen (path) + strlen (backup_path) + 100 >= PATH_MAX) {
+	if (strlen (backup_path) + strlen (path) + 100 >= PATH_MAX) {
 		fprintf (stderr, "path exceeds PATH_MAX\n");
 		exit (1);
 	}
@@ -598,11 +615,11 @@ backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 	}
 
 	p = newbr_tar;
-	for (idx = 0; idx < ftwbuf->level + 1; idx++) {
+	for (idx = 0; idx < ftwbuf->level + 2; idx++) {
 		strcpy (p, "../");
 		p += 3;
 	}
-	sprintf (p, "%s/%s", backup_path, path);
+	sprintf (--p, "%s/%s", backup_path, path);
 
 	copy_file (fpath, dst_name);
 
@@ -638,9 +655,9 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 	    char *backup_path)
 {
 	const char *path;
-	char dst_name[PATH_MAX], newbr_name[PATH_MAX], newbr_tar[PATH_MAX], *p;
+	char dst_name[PATH_MAX], newbr_name[PATH_MAX];
 	struct stat dst_sb;
-	int idx, flags;
+	int flags;
 	struct dir_data *dp;
 
 	path = fpath + base_off;
@@ -677,7 +694,7 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 		}
 	} else {
 		if (check_same (sb, &dst_sb, NULL, NULL)) {
-			touched_dir (dst_name, sb);
+			touched_dir (path, dst_name, sb);
 			return (0);
 		} else {
 			if ((dp = find_slot (fpath, sb, &flags)) == NULL) {
@@ -711,13 +728,6 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 		exit (1);
 	}
 
-	p = newbr_tar;
-	for (idx = 0; idx < ftwbuf->level + 1; idx++) {
-		strcpy (p, "../");
-		p += 3;
-	}
-	sprintf (p, "%s/%s", backup_path, path);
-
 	if (mkdir (dst_name, sb->st_mode) == -1) {
 		fprintf (stderr, "failed to create directory %s: %m\n",
 			 dst_name);
@@ -733,7 +743,7 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 		return (-1);
 	}
 
-	touched_dir (dst_name, sb);
+	touched_dir (path, dst_name, sb);
 
 	delete_file_or_dir (newbr_name);
 
@@ -752,7 +762,7 @@ backup_dir (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 		return (-1);
 	}
 
-	touched_dir (newbr_name, sb);
+	touched_dir (path, newbr_name, sb);
 
 	return (0);
 }
@@ -836,11 +846,11 @@ backup_link (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 	}
 
 	p = newbr_tar;
-	for (idx = 0; idx < ftwbuf->level + 1; idx++) {
+	for (idx = 0; idx < ftwbuf->level + 2; idx++) {
 		strcpy (p, "../");
 		p += 3;
 	}
-	sprintf (p, "%s/%s", backup_path, path);
+	sprintf (--p, "%s/%s", backup_path, path);
 
 	r = readlink (fpath, lnk_tar, sb->st_size + 1);
 
@@ -926,6 +936,7 @@ fix_dirs (void)
 		}
 
 		free (dp->path);
+		free (dp->rpath);
 		free (dp);
 	}
 
@@ -975,17 +986,21 @@ main (int argc, char **argv)
 
 	time (&rawtime);
 	timeinfo = localtime (&rawtime);
-	sprintf (backup_branch, "%04d-%02d-%02d",
-		 timeinfo->tm_year + 1900, timeinfo->tm_mon + 1,
-		 timeinfo->tm_mday);
 
-	l = strlen (backup_root) + strlen (backup_branch) + 10;
+	l = strlen ("1970-01-01") + 100;
+	if ((backup_branch = calloc (1, l)) == NULL) {
+		fprintf (stderr, "failed to allocate backup_branch\n");
+		return (1);
+	}
+	sprintf (backup_branch, "%04d-%02d-%02d", timeinfo->tm_year + 1900,
+		 timeinfo->tm_mon + 1, timeinfo->tm_mday);
+
+	l = strlen (backup_root) + strlen (backup_branch) + 100;
 	if ((backup_directory = calloc (1, l)) == NULL) {
 		fprintf (stderr,
 			 "failed to allocate backup_directory\n");
 		return (1);
 	}
-
 	sprintf (backup_directory, "%s/%s", backup_root, backup_branch);
 
 	if (mkdir (backup_directory, 0755) == -1) {
@@ -1026,6 +1041,7 @@ main (int argc, char **argv)
 				ndp = dp->next;
 
 				free (dp->path);
+				free (dp->rpath);
 				free (dp);
 			}
 		}
@@ -1033,10 +1049,12 @@ main (int argc, char **argv)
 		first_collision_dir = 0;
 		last_collision_dir = 0;
 
-		free (s);
-
 		fix_dirs ();
+
+		free (s);
 	}
+
+	valgrind_cleanup ();
 
 	return (0);
 }
