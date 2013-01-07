@@ -891,10 +891,11 @@ static int
 mk_backup (const char *fpath, const struct stat *sb,
 		int tflag, struct FTW *ftwbuf)
 {
-	if (strncmp (fpath, backup_root, strlen (backup_root)) == 0) {
-
+	if (strncmp (fpath, backup_root, strlen (backup_root)) == 0)
 		return (0);
-	}
+
+	if (strcmp (fpath + base_off, ".") == 0)
+		return (0);
 
 	switch (tflag) {
 	case FTW_F:
