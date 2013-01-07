@@ -511,7 +511,7 @@ check_same (const struct stat *a, const struct stat *b,
 			exit (1);
 		}
 
-		b_tar[b->st_size] = 0;
+		a_tar[b->st_size] = 0;
 
 		r = readlink (b_path, b_tar, b->st_size + 1);
 
