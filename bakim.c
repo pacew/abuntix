@@ -606,6 +606,9 @@ backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 
 	copy_file (fpath, dst_name);
 
+	if (chmod (dst_name, sb->st_mode) == -1)
+		fprintf (stderr, "failed to set mode on %s: %m\n", dst_name);
+
 	times.actime = sb->st_atime;
 	times.modtime = sb->st_mtime;
 
@@ -614,9 +617,8 @@ backup_file (const char *fpath, const struct stat *sb, struct FTW *ftwbuf,
 			 dst_name);
 	}
 
-	if (lchown (dst_name, sb->st_uid, sb->st_gid) == -1) {
+	if (lchown (dst_name, sb->st_uid, sb->st_gid) == -1)
 		fprintf (stderr, "failed to chown %s: %m\n", dst_name);
-	}
 
 	set_immutable (dst_name);
 
@@ -968,6 +970,8 @@ main (int argc, char **argv)
 			return (1);
 		}
 	}
+
+	umask (0);
 
 	time (&rawtime);
 	timeinfo = localtime (&rawtime);
