@@ -146,7 +146,7 @@ Ctrl Mod1 l :ExecCommand xscreensaver-command -lock
 Mod4 Mouse2 :WorkspaceMenu
 
 OnWindow Mod1 Double Mouse1 :Maximize
-Mod1 Mouse4 :NexWorkspace
+Mod1 Mouse4 :NextWorkspace
 Mod1 Mouse5 :PrevWorkspace
 OnWindow Mod1 Shift Mouse4 :TakeToNextWorkspace
 OnWindow Mod1 Shift Mouse5 :TakeToPrevWorkspace
