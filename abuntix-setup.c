@@ -1,14 +1,22 @@
+/* http://archive.ubuntu.com/ubuntu/indices/ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <ctype.h>
 
-int error_flag;
-char *arch;
+int conf_mit_mirrors;
+int conf_screensavers;
 
-char *pkgs_wanted_common[] = {
-	"emacs24",
+char *homedir;
+
+int error_flag;
+char *machine;
+char *arch;
+char *release;
+
+char *pkgs_common[] = {
 	"openssh-server",
 	"fluxbox",
 	"git-core",
@@ -26,6 +34,12 @@ char *pkgs_wanted_common[] = {
 	"libgconf2-4",
 	"gnuplot",
 	"imagemagick",
+	"texlive-xetex",
+	"texlive-latex-extra",
+	NULL
+};
+
+char *pkgs_screensavers[] = {
 	"xscreensaver",
 	"xscreensaver-data",
 	"xscreensaver-data-extra",
@@ -34,11 +48,10 @@ char *pkgs_wanted_common[] = {
 	"xscreensaver-screensaver-bsod",
 	"xscreensaver-screensaver-dizzy",
 	"xscreensaver-screensaver-webcollage",
-	"texlive-xetex",
-	"texlive-latex-extra",
+	NULL
 };
 
-char *pkgs_wanted_rich[] = {
+char *pkgs_rich[] = {
 	"conky",
 	"apache2",
 	"postgresql",
@@ -49,14 +62,53 @@ char *pkgs_wanted_rich[] = {
 	"python-pip",
 	"cmus",
 	"vlc",
+	NULL
 };
 
 void
 usage (void)
 {
-	fprintf (stderr, "usage: dev-setup [-e]\n");
+	fprintf (stderr, "usage: abuntix-setup [-e]\n");
 	exit (1);
 }
+
+int
+file_equal (char *name1, char *name2)
+{
+	FILE *in1 = NULL;
+	FILE *in2 = NULL;
+	int c1, c2;
+	int equal_flag;
+
+	equal_flag = 0;
+
+	in1 = fopen (name1, "r");
+	in2 = fopen (name2, "r");
+
+	if (in1 == NULL || in2 == NULL)
+		goto done;
+
+	while (!feof (in1) && !feof (in2)) {
+		c1 = getc (in1);
+		c2 = getc (in2);
+		
+		if (c1 == EOF && c2 == EOF) {
+			equal_flag = 1;
+			break;
+		}
+
+		if (c1 != c2)
+			break;
+	}
+
+done:
+	if (in1)
+		fclose (in1);
+	if (in2)
+		fclose (in2);
+	return (equal_flag);
+}
+
 
 void
 check_alternative (char *prog, char *wanted)
@@ -135,15 +187,21 @@ get_installed_packages (void)
 }
 
 void
-mark_packages_wanted (char **names, int nnames)
+mark_package_wanted (char *name)
 {
-	int idx;
 	struct pkg *pp;
 
-	for (idx = 0; idx < nnames; idx++) {
-		pp = find_pkg (names[idx], 1);
-		pp->wanted = 1;
-	}
+	pp = find_pkg (name, 1);
+	pp->wanted = 1;
+}
+
+void
+mark_packages_wanted (char **names)
+{
+	int idx;
+
+	for (idx = 0; names[idx]; idx++)
+		mark_package_wanted (names[idx]);
 }
 
 void
@@ -154,10 +212,17 @@ check_packages (void)
 	struct pkg *pp;
 	int missing_flag;
 
-	mark_packages_wanted (pkgs_wanted_common,
-			      sizeof pkgs_wanted_common
-			      / sizeof pkgs_wanted_common[0]);
+	mark_packages_wanted (pkgs_common);
 	
+	if (system ("apt-cache show emacs24 > /dev/null 2>&1") == 0) {
+		mark_package_wanted ("emacs24");
+	} else {
+		mark_package_wanted ("emacs");
+	}
+
+	if (conf_screensavers)
+		mark_packages_wanted (pkgs_screensavers);
+
 	get_installed_packages ();
 	
 	outp = cmd;
@@ -187,12 +252,7 @@ check_tex_papersize (void)
 	int success;
 	char buf[1000], val[1000];
 	char fname[1000];
-	char *homedir;
 
-	if ((homedir = getenv ("HOME")) == NULL) {
-		fprintf (stderr, "missing HOME environment variable\n");
-		exit (1);
-	}
 	sprintf (fname, "%s/.texmf-config", homedir);
 	if (access (fname, F_OK) >= 0) {
 		error_flag = 1;
@@ -242,123 +302,218 @@ done:
 	}
 }
 
-void
-check_emacs (void)
+int
+in_homedir (char *dest)
 {
-	system ("/usr/bin/touch ~/.emacs");
+	int n;
 
-	if (system ("/usr/bin/diff -q ~/.emacs emacsconfig")) {
+	n = strlen (homedir);
+	if (strncmp (dest, homedir, n) == 0 && dest[n] == '/')
+		return (1);
+	return (0);
+}
+
+void
+check_file (char *desired, char *dest)
+{
+	if (! file_equal (desired, dest)) {
 		error_flag = 1;
-		printf ("cp emacsconfig ~/.emacs\n\n");
-		printf ("sudo cp emacsconfig /etc/skel/.emacs\n");
+		if (in_homedir (dest)) {
+			printf ("cp %s %s\n", desired, dest);
+		} else {
+			printf ("sudo cp %s %s\n", desired, dest);
+		}
 	}
+}
+
+void
+check_dot_emacs (void)
+{
+	char dest[1000];
+
+	sprintf (dest, "%s/.emacs", homedir);
+	check_file ("emacsconfig", dest);
+
+	sprintf (dest, "/etc/skel/.emacs");
+	check_file ("emacsconfig", dest);
 }
 
 void
 check_pythonrc (void)
 {
-	system ("/usr/bin/touch ~/.pythonrc");
+	char dest[1000];
 
-	if (system ("/usr/bin/diff -q ~/.pythonrc pythonrc")) {
-		error_flag = 1;
-		printf ("cp pythonrc ~/.pythonrc\n\n");
-		printf ("sudo cp pythonrc /etc/skel/.pythonrc\n");
-	}
+	sprintf (dest, "%s/.pythonrc", homedir);
+	check_file ("pythonrc", dest);
+
+	sprintf (dest, "/etc/skel/.pythonrc");
+	check_file ("pythonrc", dest);
 }
 
 void
 check_xterm (void)
 {
-	if (system ("[ -e /etc/X11/Xresources/xterm ]")) {
-		error_flag = 1;
-		printf ("sudo cp xterm.resources"
-			" /etc/X11/Xresources/xterm\n\n");
-	}
+	char dest[1000];
+
+	sprintf (dest, "/etc/X11/Xresources/xterm");
+	check_file ("xterm.resources", dest);
 }
 
 void
 check_fluxbox (void)
 {
-	if (system ("[ -d $HOME/.fluxbox ]")) {
+	char dest[1000];
+
+	sprintf (dest, "%s/.fluxbox/init", homedir);
+	if (! file_equal (dest, "fluxbox/init")) {
 		error_flag = 1;
-		printf ("cp -rf fluxbox $HOME/.fluxbox\n");
+		printf ("cp -rf fluxbox/. %s/.fluxbox\n", homedir);
+	}
+
+	sprintf (dest, "/etc/skel/.fluxbox/init");
+	if (! file_equal (dest, "fluxbox/init")) {
+		error_flag = 1;
 		printf ("sudo cp -rf fluxbox /etc/skel/.fluxbox\n");
-		printf ("sudo cp $HOME/.fluxbox/backgrounds/beast.png"
-			" /usr/share/images/fluxbox/beast.png\n");
 	}
 }
 
 void
 check_chrome (void)
 {
-	char *cmd;
+	char pkgname[1000];
+	struct pkg *pp;
 
-	cmd = "/usr/bin/dpkg-query --show google-chrome > /dev/null 2>&1";
-
-	if (system (cmd)) {
-		printf ("wget https://dl.google.com/linux/direct/google-chrome-stable_current_%s.deb\n", arch);
-		printf ("sudo dpkg -i google-chrome-stable_current_%s.deb\n\n", arch);
+	if ((pp = find_pkg ("google-chrome-stable", 0)) == NULL
+	    || pp->installed == 0) {
 		error_flag = 1;
+		sprintf (pkgname, "google-chrome-stable_current_%s.deb", arch);
+		printf ("wget https://dl.google.com/linux/direct/%s\n",
+			pkgname);
+		printf ("sudo dpkg -i %s\n\n", pkgname);
 	}
 }
 
-void
-check_env (void)
+int
+string_present (char *filename, char *str)
 {
-	char *cmd, *pythonstartup, *histsize, *histfilesize;
+	FILE *inf;
+	int found;
+	char buf[1000];
 
-	histsize = getenv ("HISTSIZE");
-	if (!histsize || strtol (histsize, (char **) NULL, 10) < 100000) {
-		printf ("# HISTSIZE = %s, suggested increasing size.\n",
-			histsize);
-		printf ("echo 'export HISTSIZE=100000' >> $HOME/.bashrc\n\n");
-		error_flag = 1;
+	if ((inf = fopen (filename, "r")) == NULL)
+		return (0);
+
+	found = 0;
+	while (fgets (buf, sizeof buf, inf) != NULL) {
+		if (strstr (buf, str) != NULL) {
+			found = 1;
+			break;
+		}
 	}
 
-	histfilesize = getenv ("HISTFILESIZE");
-	if (!histfilesize || strtol (histfilesize,
-				     (char **) NULL, 10) < 200000) {
-		printf ("# HISTFILESIZE = %s, suggest increasing size.\n",
-			histfilesize);
-		printf ("echo 'export HISTFILESIZE=200000' >> $HOME/.bashrc\n\n");
-		error_flag = 1;
-	}
+	fclose (inf);
 
-	cmd = "grep -q 'alias gpg=gpg2' $HOME/.bashrc";
-	if (system (cmd)) {
-		printf ("# If this appears after running this command,"
-			" check gpg version manually. Script may fail"
-			" to detect version\n");
-		printf ("echo 'alias gpg=gpg2' >> $HOME/.bashrc\n");
-		error_flag = 1;
-	}
-
-	/* cmd = "sqlite --version"; */
-	/* if (system (cmd)) */
-	/* 	printf ("echo 'alias sqlite=sqlite3' >> $HOME/.bashrc"); */
-
-	pythonstartup = getenv ("PYTHONSTARTUP");
-	if (!pythonstartup || !strcmp (pythonstartup, "~/.pythonrc")) {
-		printf ("echo 'export PYTHONSTARTUP=.pythronrc'"
-			" >> $HOME/.bashrc\n");
-		error_flag = 1;
-	}
+	return (found);
 }
 
 void
-check_sources (void)
+check_string (char *filename, char *str)
 {
-	char *cmd;
+	char *p;
 
-	cmd = "grep -q mirrors.mit.edu /etc/apt/sources.list >/dev/null 2>&1";
-	if (system (cmd)) {
-		printf ("cat /etc/apt/sources.list"
-			" | sed 's#[^/]*archive.ubuntu.com#mirrors.mit.edu#g'"
+	if (! string_present (filename, str)) {
+		error_flag = 1;
+		printf ("echo '");
+		for (p = str; *p; p++) {
+			if (*p == '\'' || *p == '\\')
+				putchar ('\\');
+			putchar (*p);
+		}
+		printf ("' >> %s\n", filename);
+	}
+}
+
+
+void
+check_bashrc (void)
+{
+	char bashrc[1000];
+
+	sprintf (bashrc, "%s/.bashrc", homedir);
+	check_string (bashrc, "export HISTSIZE=100000");
+	check_string (bashrc, "export HISTFILESIZE=200000");
+	check_string (bashrc, "export PYTHONSTARTUP=.pythronrc");
+}
+
+void
+check_mit_mirrors (void)
+{
+	if (! string_present ("/etc/apt/sources.list", "mirrors.mit.edu")) {
+		error_flag = 1;
+		printf ("sed 's:[^/]*archive.ubuntu.com:mirrors.mit.edu:g'"
+			" < /etc/apt/sources.list"
 			" > sources.list\n");
 		printf ("sudo cp sources.list /etc/apt/sources.list\n");
 		printf ("sudo apt-get update\n");
-		error_flag = 1;
 	}
+}
+
+char *
+get_from_cmd (char *cmd)
+{
+	FILE *inf;
+	char buf[1000];
+	int len;
+
+	if ((inf = popen (cmd, "r")) == NULL) {
+		fprintf (stderr, "error running: %s\n", cmd);
+		exit (1);
+	}
+	if (fgets (buf, sizeof buf, inf) == NULL) {
+		fprintf (stderr, "%s: no data\n", cmd);
+		exit (1);
+	}
+	fclose (inf);
+
+	len = strlen (buf);
+	while (len > 0 && isspace (buf[len-1]))
+		buf[--len] = 0;
+	return (strdup (buf));
+}
+
+void
+abuntix_config (void)
+{
+	FILE *inf;
+	char buf[1000];
+	char *name, *val;
+	char *p;
+	int len;
+
+	if ((inf = fopen ("TMP.conf", "r")) == NULL) {
+		system ("./config");
+		if ((inf = fopen ("TMP.conf", "r")) == NULL) {
+			fprintf (stderr, "can't open TMP.conf\n");
+			exit (1);
+		}
+	}
+	while (fgets (buf, sizeof buf, inf) != NULL) {
+		len = strlen (buf);
+		while (len > 0 && isspace (buf[len-1]))
+			buf[--len] = 0;
+		name = buf;
+		for (p = buf; *p && *p != '='; p++)
+			;
+		if (*p)
+			*p++ = 0;
+		val = p;
+
+		if (strcmp (name, "mit_mirrors") == 0)
+			conf_mit_mirrors = atoi (val);
+		else if (strcmp (name, "screensavers") == 0)
+			conf_screensavers = atoi (val);
+	}
+	fclose (inf);
 }
 
 int
@@ -376,20 +531,33 @@ main (int argc, char **argv)
 	if (optind > argc || optind != argc)
 		usage ();
 
-	if (!system ("[ `uname -i` = x86_64 ]"))
-		arch = "amd64";
-	else
-		arch = "i386";
+	if ((homedir = getenv ("HOME")) == NULL) {
+		fprintf (stderr, "missing $HOME\n");
+		exit (1);
+	}
 
-	check_sources ();
+	abuntix_config ();
+
+	machine = get_from_cmd ("uname --machine");
+	if (strcmp (machine, "x86_64") == 0) {
+		arch = "amd64";
+	} else {
+		arch = "i386";
+	}
+
+	/* a string like "12.04" */
+	release = get_from_cmd ("lsb_release --release --short");
+
+	if (conf_mit_mirrors)
+		check_mit_mirrors ();
 	check_packages ();
-	check_emacs ();
+	check_dot_emacs ();
 	check_pythonrc ();
 	check_xterm ();
 	check_fluxbox ();
 	check_tex_papersize ();
 	check_chrome ();
-	check_env ();
+	check_bashrc ();
 	
 	check_alternative ("editor", "emacs");
 	check_alternative ("x-terminal-emulator", "uxterm");

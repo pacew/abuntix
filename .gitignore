@@ -14,3 +14,4 @@ config.status
 src/.deps/
 bakim*.tar.gz
 bakim/src/.deps/bakim.Po
+config
